@@ -17,6 +17,7 @@ LabelDialogField = Literal["label", "flags", "group_id", "description"]
 @dataclasses.dataclass(frozen=True)
 class LabelDialogEntry:
     label: str
+    attributes: dict[str, str]
     flags: dict[str, bool]
     group_id: int | None
     description: str
@@ -34,6 +35,7 @@ class LabelDialog(QtWidgets.QDialog):
         text: str = _PLACEHOLDER_TEXT,
         parent: QtWidgets.QWidget | None = None,
         labels: list[str] | None = None,
+        shape_attributes: list[dict] | None = None,
         sort_labels: bool = True,
         show_text_field: bool = True,
         completion: str = "startswith",
@@ -41,7 +43,6 @@ class LabelDialog(QtWidgets.QDialog):
         flags: dict[str, list[str]] | None = None,
         label_history: list[str] | None = None,
     ) -> None:
-        LABEL_LIST_HEIGHT: Final[int] = 150
 
         super().__init__(parent)
         dialog_name = self.tr("Shape Label")
@@ -51,9 +52,12 @@ class LabelDialog(QtWidgets.QDialog):
         self._sort_labels = sort_labels
         self._flags_spec = compile_label_flags(label_flags=flags)
         self._label_history = label_history[:] if label_history is not None else []
+        self._attribute_specs = shape_attributes or []
+        self._attribute_lists: dict[str, QtWidgets.QListWidget] = {}
         # Fields the current popup shows read-only because the caller has no
         # single value for them (a mixed multi-selection).
         self._locked: frozenset[LabelDialogField] = frozenset()
+        self._locked_attributes: frozenset[str] = frozenset()
         # A popup opened without a label starts from the last one accepted.
         self._last_label = ""
         # The flags currently on show, keyed by flag name, so a flag named by
@@ -89,8 +93,49 @@ class LabelDialog(QtWidgets.QDialog):
         self.edit_description.setFixedHeight(50)
 
         self.label_list = QtWidgets.QListWidget()
-        self.label_list.setFixedHeight(LABEL_LIST_HEIGHT)
+        
+        # Build custom attribute lists
+        for spec in self._attribute_specs:
+            key = spec["key"]
 
+            attribute_list = QtWidgets.QListWidget()
+            attribute_list.setSelectionMode(
+                QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+            )
+
+            for option in spec.get("options", []):
+                attribute_list.addItem(str(option))
+
+            # Start with nothing selected.
+            attribute_list.setCurrentRow(-1)
+            attribute_list.clearSelection()
+
+            self._attribute_lists[key] = attribute_list
+            
+        # Make selected items clearly visible
+        for list_widget in [
+            self.label_list,
+            *self._attribute_lists.values(),
+        ]:
+            palette = list_widget.palette()
+
+            for color_group in (
+                QtGui.QPalette.ColorGroup.Active,
+                QtGui.QPalette.ColorGroup.Inactive,
+            ):
+                palette.setColor(
+                    color_group,
+                    QtGui.QPalette.ColorRole.Highlight,
+                    QtGui.QColor("#0D47A1"),
+                )
+                palette.setColor(
+                    color_group,
+                    QtGui.QPalette.ColorRole.HighlightedText,
+                    QtGui.QColor("white"),
+                )
+
+            list_widget.setPalette(palette)
+            
         # Configure label list
         if sort_labels:
             self.label_list.setDragDropMode(
@@ -139,8 +184,42 @@ class LabelDialog(QtWidgets.QDialog):
         else:
             self.edit.setParent(None)
 
-        main_layout.addWidget(button_box)
-        main_layout.addWidget(self.label_list)
+        selection_layout = QtWidgets.QGridLayout()
+        selection_layout.setHorizontalSpacing(6)
+        selection_layout.setVerticalSpacing(4)
+
+        # Class
+        selection_layout.addWidget(
+            QtWidgets.QLabel(self.tr("Class")),
+            0,
+            0,
+        )
+        selection_layout.addWidget(
+            self.label_list,
+            1,
+            0,
+        )
+
+        # Custom attributes
+        for column, spec in enumerate(self._attribute_specs, start=1):
+            key = spec["key"]
+            title = spec.get("label", key)
+
+            selection_layout.addWidget(
+                QtWidgets.QLabel(title),
+                0,
+                column,
+            )
+            selection_layout.addWidget(
+                self._attribute_lists[key],
+                1,
+                column,
+            )
+
+        for column in range(1 + len(self._attribute_specs)):
+            selection_layout.setColumnStretch(column, 1)
+
+        main_layout.addLayout(selection_layout)
 
         self._flags_container = QtWidgets.QWidget()
         self._flags_layout = QtWidgets.QVBoxLayout()
@@ -157,12 +236,16 @@ class LabelDialog(QtWidgets.QDialog):
         self._flags_scroll.setWidget(self._flags_container)
         main_layout.addWidget(self._flags_scroll)
 
-        main_layout.addWidget(self.edit_description)
+        main_layout.addWidget(button_box)
 
         # Connect signals
         self.edit.textChanged.connect(self._on_text_changed)
         self.label_list.currentItemChanged.connect(self._on_label_selected)
-        self.label_list.itemDoubleClicked.connect(self._submit_item)
+        
+        for attribute_list in self._attribute_lists.values():
+            attribute_list.currentItemChanged.connect(
+                lambda _current, _previous: self._refresh_ok_button()
+            )
 
         # Populate initial labels
         for label in dict.fromkeys([*(labels or []), *self._label_history]):
@@ -204,10 +287,19 @@ class LabelDialog(QtWidgets.QDialog):
             self._update_flags(text)
 
     def _refresh_ok_button(self) -> None:
-        # Return only ever reaches an enabled default button, so disabling OK is
-        # what keeps a blank label from being submitted.
+        label_selected = (
+            "label" in self._locked
+            or self.label_list.currentItem() is not None
+        )
+
+        attributes_selected = all(
+            key in self._locked_attributes
+            or attribute_list.currentItem() is not None
+            for key, attribute_list in self._attribute_lists.items()
+        )
+
         self._ok_button.setEnabled(
-            "label" in self._locked or bool(self.edit.text().strip())
+            label_selected and attributes_selected
         )
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent, /) -> bool:
@@ -233,10 +325,6 @@ class LabelDialog(QtWidgets.QDialog):
         if current is None:
             return
         self.edit.setText(current.text())
-
-    def _submit_item(self, item: QtWidgets.QListWidgetItem, /) -> None:
-        self.label_list.setCurrentItem(item)
-        self._ok_button.click()
 
     def _clear_flag_checkboxes(self) -> None:
         self._flag_checkboxes.clear()
@@ -299,6 +387,7 @@ class LabelDialog(QtWidgets.QDialog):
         self,
         *,
         text: str | None = None,
+        attributes: dict[str, str] | None = None,
         flags: dict[str, bool] | None = None,
         group_id: int | None = None,
         description: str | None = None,
@@ -319,10 +408,8 @@ class LabelDialog(QtWidgets.QDialog):
         for name, widgets in self._get_field_widgets().items():
             for widget in widgets:
                 widget.setEnabled(name not in self._locked)
-        if "label" in self._locked:
+        if "label" in self._locked or text is None:
             text = ""
-        elif text is None:
-            text = self._last_label
         if "group_id" in self._locked:
             group_id = None
         if "description" in self._locked:
@@ -337,6 +424,26 @@ class LabelDialog(QtWidgets.QDialog):
         self.edit.selectAll()
         self.edit_group_id.setText("" if group_id is None else str(group_id))
         self.edit_description.setPlainText(description or "")
+
+        # Reset / restore custom attributes
+        attributes = attributes or {}
+
+        for key, attribute_list in self._attribute_lists.items():
+            attribute_list.clearSelection()
+            attribute_list.setCurrentRow(-1)
+
+            value = attributes.get(key)
+            if value is None:
+                continue
+
+            items = attribute_list.findItems(
+                value,
+                QtCore.Qt.MatchFlag.MatchExactly,
+            )
+
+            if items:
+                attribute_list.setCurrentItem(items[0])
+
         if flags is None:
             self._update_flags(text)
         else:
@@ -345,6 +452,7 @@ class LabelDialog(QtWidgets.QDialog):
         self.label_list.setCurrentRow(self._find_label_row(text))
 
         self._fit_label_list_to_content()
+        self.adjustSize()
         self._refresh_ok_button()
         self.edit.setFocus(QtCore.Qt.FocusReason.PopupFocusReason)
 
@@ -366,6 +474,7 @@ class LabelDialog(QtWidgets.QDialog):
         group_id_text = self.edit_group_id.text()
         entry = LabelDialogEntry(
             label=self.edit.text(),
+            attributes=self._collect_attributes(),
             flags=self._collect_flags(),
             group_id=int(group_id_text) if group_id_text else None,
             description=self.edit_description.toPlainText(),
@@ -405,14 +514,49 @@ class LabelDialog(QtWidgets.QDialog):
 
     def _collect_flags(self) -> dict[str, bool]:
         return {key: cb.isChecked() for key, cb in self._flag_checkboxes.items()}
+    
+    def _collect_attributes(self) -> dict[str, str]:
+        attributes = {}
 
+        for key, attribute_list in self._attribute_lists.items():
+            item = attribute_list.currentItem()
+
+            if item is not None:
+                attributes[key] = item.text()
+
+        return attributes
+    
     def _fit_label_list_to_content(self) -> None:
-        if self._fit_to_content["row"]:
-            self.label_list.setMinimumHeight(
-                self.label_list.sizeHintForRow(0) * self.label_list.count() + 2
-            )
-        if self._fit_to_content["column"]:
-            self.label_list.setMinimumWidth(self.label_list.sizeHintForColumn(0) + 2)
+        lists = [
+            self.label_list,
+            *self._attribute_lists.values(),
+        ]
+
+        if not lists:
+            return
+
+        # 가장 많은 항목 수 기준
+        max_count = max(
+            list_widget.count()
+            for list_widget in lists
+        )
+
+        if max_count == 0:
+            return
+
+        # Class의 행 높이를 기준으로 전체 높이 계산
+        row_height = self.label_list.sizeHintForRow(0)
+
+        height = (
+            row_height * max_count
+            + self.label_list.frameWidth() * 2
+            + 4
+        )
+
+        # 모든 목록을 동일 크기로
+        for list_widget in lists:
+            list_widget.setFixedHeight(height)
+            list_widget.setMinimumWidth(220)
 
     def _move_within_screen(self, target: QtCore.QPoint, /) -> None:
         self.adjustSize()
@@ -440,3 +584,4 @@ class LabelDialog(QtWidgets.QDialog):
         dy = max(dy, available.top() - frame.top())
         if dx or dy:
             self.move(self.x() + dx, self.y() + dy)
+ 

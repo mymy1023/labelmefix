@@ -14,12 +14,10 @@ from pathlib import Path
 from typing import Final
 from typing import Literal
 from typing import NamedTuple
-from typing import TypeAlias
 from typing import cast
 
 import natsort
 import numpy as np
-import osam
 from loguru import logger
 from PySide6 import QtCore
 from PySide6 import QtGui
@@ -30,8 +28,6 @@ from PySide6.QtWidgets import QMessageBox
 from labelme import __appname__
 from labelme import __version__
 
-from . import _ai_models
-from . import _automation
 from . import _config
 from . import _utils
 from ._label_file import LABEL_FILE_SUFFIX
@@ -47,8 +43,6 @@ from ._shape import Shape
 from ._shape import ShapeType
 from ._shape_clipboard import ShapeClipboard
 from ._shape_color import resolve_shape_color
-from ._widgets import AiAssistedAnnotationWidget
-from ._widgets import AiTextToAnnotationWidget
 from ._widgets import BrightnessContrastDialog
 from ._widgets import Canvas
 from ._widgets import EmptyStateWidget
@@ -63,7 +57,6 @@ from ._widgets import StatusStats
 from ._widgets import ToolBar
 from ._widgets import UniqueLabelQListWidget
 from ._widgets import ZoomWidget
-from ._widgets import download_ai_model
 from ._widgets import format_shape_label
 from ._widgets.label_list_widget import LABEL_COLOR_ROLE
 
@@ -72,13 +65,6 @@ class _ZoomMode(enum.Enum):
     FIT_WINDOW = enum.auto()
     FIT_WIDTH = enum.auto()
     MANUAL_ZOOM = enum.auto()
-
-
-_TextToAnnotationCreateMode: TypeAlias = Literal["polygon", "rectangle"]
-_AI_CREATE_MODES: Final[tuple[str, ...]] = (
-    "ai_points_to_shape",
-    "ai_box_to_shape",
-)
 
 # Keys of the Window State store, shared by the restore, reset, and close paths.
 WINDOW_SIZE_KEY: Final[str] = "window/size"
@@ -148,8 +134,6 @@ class _Actions(NamedTuple):
     create_line_mode: QtGui.QAction
     create_point_mode: QtGui.QAction
     create_line_strip_mode: QtGui.QAction
-    create_ai_points_to_shape_mode: QtGui.QAction
-    create_ai_box_to_shape_mode: QtGui.QAction
     open_next_img: QtGui.QAction
     open_prev_img: QtGui.QAction
     keep_prev_zoom: QtGui.QAction
@@ -186,8 +170,8 @@ class MainWindow(QtWidgets.QMainWindow):
     _config_file: Path | None
     _config: dict
     _config_overrides: dict
+    _opened_as_directory: bool = False
 
-    _text_osam_session: _automation.OsamSession | None = None
     _is_changed: bool = False
     _shape_clipboard: ShapeClipboard
     _zoom_mode: _ZoomMode
@@ -202,8 +186,6 @@ class MainWindow(QtWidgets.QMainWindow):
     _label_dialog: LabelDialog
     _settings_dialog: SettingsDialog | None = None
     _shape_color_preview: dict | None
-    _ai_annotation: AiAssistedAnnotationWidget
-    _ai_text: AiTextToAnnotationWidget
 
     _output_dir: Path | None
     _image: QtGui.QImage
@@ -264,31 +246,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._menus = self._setup_menus()
 
-        self._ai_annotation = AiAssistedAnnotationWidget(
-            default_model=self._config["ai"]["default"],
-            polygon_detail=self._config["mask_polygonization"]["detail"],
-            on_model_changed=self._on_ai_model_changed,
-            on_output_format_changed=self._canvas_widgets.canvas.set_ai_output_format,
-            on_polygon_detail_changed=self._on_ai_polygon_detail_changed,
-            parent=self,
-        )
-        self._canvas_widgets.canvas.set_ai_model_name(
-            model_name=self._ai_annotation.current_model_id
-        )
-        self._canvas_widgets.canvas.set_ai_output_format(
-            self._ai_annotation.output_format
-        )
-        self._canvas_widgets.canvas.set_ai_polygon_detail(
-            detail=self._config["mask_polygonization"]["detail"]
-        )
-        self._ai_annotation.setEnabled(False)
-        self._ai_buttons_highlighted = False
-
-        self._ai_text = AiTextToAnnotationWidget(
-            on_submit=self._submit_ai_prompt, parent=self
-        )
-        self._ai_text.setEnabled(False)
-
         self._setup_toolbars()
 
         self._status_bar = self._setup_status_bar()
@@ -327,9 +284,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 widget.setStyleSheet(sheet)  # re-resolve palette refs; also repaints
             else:
                 widget.update()
-        # The AI-button highlight bakes palette colors into its stylesheet (no
-        # palette() ref), so recompute it against the new palette.
-        self._highlight_ai_buttons(self._ai_buttons_highlighted)
 
     def _setup_actions(self) -> _Actions:
         action = functools.partial(_utils.new_action, self)
@@ -367,6 +321,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Save labels to file"),
             enabled=False,
         )
+
         save_as = action(
             text=self.tr("&Save As"),
             slot=lambda: self._save_label_file(save_as=True),
@@ -375,6 +330,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Save the labels under a new file name"),
             enabled=False,
         )
+
         save_auto = action(
             text=self.tr("Save &Automatically"),
             tip=self.tr("Save automatically"),
@@ -527,11 +483,11 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=False,
         )
         create_rectangle_mode = action(
-            text=self.tr("Rectangle"),
+            text=self.tr("Create\nShapes"),
             slot=lambda: self._switch_canvas_mode(edit=False, create_mode="rectangle"),
             shortcut=shortcuts["create_rectangle"],
             icon="phosphor/rectangle.svg",
-            tip=self.tr("Start drawing rectangles"),
+            tip=self.tr("Start drawing bounding boxes"),
             enabled=False,
         )
         create_oriented_rectangle_mode = action(
@@ -576,28 +532,6 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr(
                 "Click to place linestrip points; Ctrl+click places the last one."
             ),
-            enabled=False,
-        )
-        create_ai_points_to_shape_mode = action(
-            text=self.tr("AI-Points"),
-            slot=lambda: self._switch_canvas_mode(
-                edit=False, create_mode="ai_points_to_shape"
-            ),
-            shortcut=None,
-            icon="ai-points.svg",
-            tip=self.tr(
-                "Click points to segment object. Ctrl+LeftClick ends creation."
-            ),
-            enabled=False,
-        )
-        create_ai_box_to_shape_mode = action(
-            text=self.tr("AI-Box"),
-            slot=lambda: self._switch_canvas_mode(
-                edit=False, create_mode="ai_box_to_shape"
-            ),
-            shortcut=None,
-            icon="ai-box.svg",
-            tip=self.tr("Draw a bounding box to segment object."),
             enabled=False,
         )
         open_next_img = action(
@@ -732,15 +666,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._canvas_widgets.canvas.edge_selected.connect(add_point_to_edge.setEnabled)
 
         draw = [
-            ("polygon", create_mode),
+#            ("polygon", create_mode),
             ("rectangle", create_rectangle_mode),
-            ("oriented_rectangle", create_oriented_rectangle_mode),
-            ("circle", create_circle_mode),
-            ("point", create_point_mode),
-            ("line", create_line_mode),
-            ("linestrip", create_line_strip_mode),
-            ("ai_points_to_shape", create_ai_points_to_shape_mode),
-            ("ai_box_to_shape", create_ai_box_to_shape_mode),
+#            ("oriented_rectangle", create_oriented_rectangle_mode),
+#            ("circle", create_circle_mode),
+#            ("point", create_point_mode),
+#            ("line", create_line_mode),
+#            ("linestrip", create_line_strip_mode),
         ]
         zoom = (
             self._canvas_widgets.zoom_widget,
@@ -759,8 +691,6 @@ class MainWindow(QtWidgets.QMainWindow):
             create_line_mode,
             create_point_mode,
             create_line_strip_mode,
-            create_ai_points_to_shape_mode,
-            create_ai_box_to_shape_mode,
             brightness_contrast,
         )
         on_shapes_present = (save_as, hide_all, show_all, toggle_all)
@@ -822,8 +752,6 @@ class MainWindow(QtWidgets.QMainWindow):
             create_line_mode=create_line_mode,
             create_point_mode=create_point_mode,
             create_line_strip_mode=create_line_strip_mode,
-            create_ai_points_to_shape_mode=create_ai_points_to_shape_mode,
-            create_ai_box_to_shape_mode=create_ai_box_to_shape_mode,
             open_next_img=open_next_img,
             open_prev_img=open_prev_img,
             keep_prev_zoom=keep_prev_zoom,
@@ -962,11 +890,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _setup_toolbars(self) -> None:
         separator = functools.partial(_utils.new_separator, self)
-        select_ai_model = QtWidgets.QWidgetAction(self)
-        select_ai_model.setDefaultWidget(self._ai_annotation)
-
-        ai_prompt_action = QtWidgets.QWidgetAction(self)
-        ai_prompt_action.setDefaultWidget(self._ai_text)
 
         self.addToolBar(
             Qt.ToolBarArea.TopToolBarArea,
@@ -979,45 +902,20 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._actions.open_next_img,
                     self._actions.save,
                     self._actions.delete_file,
+
                     separator(),
+
+                    self._actions.create_rectangle_mode,
                     self._actions.edit_mode,
                     self._actions.duplicate,
                     self._actions.delete,
                     self._actions.undo,
                     self._actions.brightness_contrast,
-                    separator(),
-                    self._actions.fit_window,
-                    self._actions.zoom_widget_action,
-                    separator(),
-                    select_ai_model,
-                    separator(),
-                    ai_prompt_action,
                 ],
                 font_base=self.font(),
             ),
         )
-        self.addToolBar(
-            Qt.ToolBarArea.LeftToolBarArea,
-            ToolBar(
-                title="CreateShapeTools",
-                actions=[
-                    *[
-                        a
-                        for mode, a in self._actions.draw
-                        if not mode.startswith("ai_")
-                    ],
-                    separator(),
-                    *[a for mode, a in self._actions.draw if mode.startswith("ai_")],
-                ],
-                orientation=Qt.Orientation.Vertical,
-                button_style=Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
-                font_base=self.font(),
-            ),
-        )
-        self._ai_annotation.hover_highlight_requested.connect(
-            self._highlight_ai_buttons
-        )
-
+            
     def _setup_app_state(
         self,
         *,
@@ -1025,6 +923,7 @@ class MainWindow(QtWidgets.QMainWindow):
         output_dir: str | None,
     ) -> None:
         self._output_dir = Path(output_dir) if output_dir else None
+        self._opened_as_directory = False
 
         self._image = QtGui.QImage()
         self._annotation = None
@@ -1103,9 +1002,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         canvas.set_point_size(point_size=self._config["shape"]["point_size"])
         canvas.set_show_labels(value=self._config["shape"]["show_labels"])
-        canvas.set_ai_existing_shape_suppression(
-            enabled=self._config["ai"]["suppress_existing_shape_matches"]
-        )
         canvas.set_draft_palette(
             palette=Palette(
                 line=QtGui.QColor(*self._config["shape"]["line_color"]),
@@ -1138,17 +1034,9 @@ class MainWindow(QtWidgets.QMainWindow):
         canvas.pan_request.connect(self._on_pan_request)
 
         canvas.new_shape.connect(self._on_new_shape)
-        canvas.inference_produced_no_shapes.connect(
-            self._on_inference_produced_no_shapes
-        )
         # The preview path emits this from inside paintEvent (an active
         # QPainter); a queued connection defers the status-bar update until
         # after the paint cycle so it never mutates UI mid-paint.
-        canvas.inference_failed.connect(
-            self._on_inference_failed,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        canvas.point_prompt_rejected.connect(self._on_point_prompt_rejected)
         canvas.degenerate_shape_rejected.connect(
             lambda: self.show_status_message(
                 self.tr("Shape had no area; nothing created."), delay=5000
@@ -1371,67 +1259,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def show_status_message(self, message: str, /, *, delay: int = 500) -> None:
         self.statusBar().showMessage(message, delay)
 
-    def _submit_ai_prompt(self, _: bool, /) -> None:  # noqa: FBT001 -- submit callback receives the Qt clicked flag
-        create_mode = self._canvas_widgets.canvas.create_mode
-        shape_type = _resolve_text_annotation_shape_type(
-            create_mode=create_mode,
-            ai_output_format=self._ai_annotation.output_format,
-        )
-        if shape_type is None:
-            logger.warning("Unsupported create_mode={!r}", create_mode)
-            return
-
-        texts = self._ai_text.get_text_prompt().split(",")
-
-        model_name: str = self._ai_text.get_model_name()
-        model_type = osam.apis.get_model_type_by_name(model_name)
-        if model_type.get_size() is None:
-            if not download_ai_model(model_name=model_name, parent=self):
-                return
-        if (
-            self._text_osam_session is None
-            or self._text_osam_session.model_name != model_name
-        ):
-            self._text_osam_session = _automation.OsamSession(model_name=model_name)
-
-        try:
-            shapes = _automation.propose_shapes_from_texts(
-                session=self._text_osam_session,
-                image=_utils.img_qt_to_rgb_arr(self._image),
-                image_id=str(hash(self._image_path)),
-                texts=texts,
-                shape_type=shape_type,
-                existing_shapes=self._canvas_widgets.canvas.shapes,
-                iou_threshold=self._ai_text.get_iou_threshold(),
-                score_threshold=self._ai_text.get_score_threshold(),
-                image_size=(
-                    None
-                    if self._config["canvas"]["allow_out_of_bounds_points"]
-                    else (self._image.width(), self._image.height())
-                ),
-                polygon_detail=self._config["mask_polygonization"]["detail"],
-            )
-        except _automation.MaskOutputUnavailableError:
-            QtWidgets.QMessageBox.warning(
-                self,
-                self.tr("Mask Output Unavailable"),
-                self.tr(
-                    "%s only detects bounding boxes and cannot create "
-                    "'%s' annotations.\n\n"
-                    "Switch the AI Text-to-Annotation model to 'SAM3 (smart)', "
-                    "or set the output format to 'Rectangle'."
-                )
-                % (self._ai_text.get_model_display_name(), shape_type),
-            )
-            return
-        except Exception as e:
-            logger.opt(exception=e).error("AI text inference failed")
-            self._on_inference_failed(f"{type(e).__name__}: {e}")
-            return
-
-        self._load_shapes(shapes, replace=False)
-        self.mark_dirty()
-
     def reset_state(self) -> None:
         self._docks.label_list.clear()
         self._annotation = None
@@ -1477,36 +1304,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._actions.edit_mode.setEnabled(
             not edit and not self._canvas_widgets.canvas.is_drawing
         )
-        self._ai_text.setEnabled(
-            not edit
-            and create_mode
-            in (*typing.get_args(_TextToAnnotationCreateMode), *_AI_CREATE_MODES)
-        )
-        self._ai_annotation.setEnabled(not edit and create_mode in _AI_CREATE_MODES)
-        self._set_point_prompt_mode(enabled=create_mode == "ai_points_to_shape")
-
-    def _highlight_ai_buttons(self, highlight: bool, /) -> None:  # noqa: FBT001 -- hover_highlight_requested slot
-        self._ai_buttons_highlighted = highlight
-        BG_ALPHA: Final = 60
-        BORDER_ALPHA: Final = 120
-        # alpha 0 (not highlighted) reads as transparent; HexArgb gives "#AARRGGBB",
-        # which Qt stylesheets accept.
-        bg = self.palette().color(QtGui.QPalette.ColorRole.Highlight)
-        bg.setAlpha(BG_ALPHA if highlight else 0)
-        border = QtGui.QColor(bg)
-        border.setAlpha(BORDER_ALPHA if highlight else 0)
-        style = (
-            "QToolButton:!checked:!pressed {"
-            f" background-color: {bg.name(QtGui.QColor.NameFormat.HexArgb)};"
-            f" border: 1px solid {border.name(QtGui.QColor.NameFormat.HexArgb)};"
-            " }"
-        )
-        for mode, action in self._actions.draw:
-            if mode not in _AI_CREATE_MODES:
-                continue
-            for widget in action.associatedObjects():
-                if isinstance(widget, QtWidgets.QToolButton):
-                    widget.setStyleSheet(style)
 
     def show_label_list_menu(self, point: QtCore.QPoint, /) -> None:
         self._label_list_menu_origin = self._docks.label_list.mapToGlobal(point)
@@ -1556,6 +1353,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         entry = self._label_dialog.popup(
             text=first_shape.label,
+            attributes=first_shape.other_data,
             flags=first_shape.flags,
             group_id=first_shape.group_id,
             description=first_shape.description,
@@ -1585,7 +1383,9 @@ class MainWindow(QtWidgets.QMainWindow):
             for field in typing.get_args(LabelDialogField):
                 if field not in locked:
                     setattr(shape, field, getattr(entry, field))
-
+            
+            shape.other_data.update(entry.attributes)
+            
             assert shape.label is not None
             fill_rgb = self._get_rgb_by_label(
                 label=shape.label,
@@ -1836,13 +1636,17 @@ class MainWindow(QtWidgets.QMainWindow):
     # Callback functions:
 
     def _on_new_shape(self) -> None:
-        items = self._docks.unique_label_list.selectedItems()
-        text = items[0].data(Qt.ItemDataRole.UserRole) if items else None
-        if self._config["display_label_popup"] or not text:
-            entry = self._label_dialog.popup(text=text)
+        if self._config["display_label_popup"]:
+            entry = self._label_dialog.popup()
         else:
+            items = self._docks.unique_label_list.selectedItems()
+            text = items[0].data(Qt.ItemDataRole.UserRole) if items else None
             entry = LabelDialogEntry(
-                label=text, flags={}, group_id=None, description=""
+                label=text or "",
+                attributes={},
+                flags={},
+                group_id=None,
+                description="",
             )
 
         if entry is not None and not self.validate_label(label=entry.label):
@@ -1865,35 +1669,15 @@ class MainWindow(QtWidgets.QMainWindow):
         for shape in shapes:
             if entry.group_id is not None or shape.group_id is None:
                 shape.group_id = entry.group_id
+
             shape.description = entry.description
+            shape.other_data.update(entry.attributes)
+
             self.add_label(shape=shape)
         self._actions.edit_mode.setEnabled(True)
         self._actions.undo_last_point.setEnabled(False)
         self._actions.undo.setEnabled(True)
         self.mark_dirty()
-
-    def _on_inference_produced_no_shapes(self) -> None:
-        self.show_status_message(
-            self.tr("AI inference produced no new annotation."), delay=5000
-        )
-
-    def _on_inference_failed(self, message: str, /) -> None:
-        self.show_status_message(
-            self.tr("AI inference failed: %s") % message, delay=10000
-        )
-
-    def _on_point_prompt_rejected(self, model_name: str, /) -> None:
-        option = _ai_models.find_ai_assist_model_option(model_name=model_name)
-        assert option is not None
-        QtWidgets.QMessageBox.warning(
-            self,
-            self.tr("AI-Points Unavailable"),
-            self.tr(
-                "%s does not support point prompts.\n"
-                "Please select a different model or use AI-Box mode."
-            )
-            % option.display_name,
-        )
 
     def _on_scroll_request(self, delta: int, orientation: Qt.Orientation, /) -> None:
         units = -delta * 0.1  # natural scroll
@@ -2536,6 +2320,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return LabelDialog(
             parent=self,
             labels=self._config["labels"],
+            shape_attributes=self._config["shape_attributes"],
             sort_labels=self._config["sort_labels"],
             show_text_field=self._config["show_label_text_field"],
             completion=self._config["label_completion"],
@@ -2548,34 +2333,6 @@ class MainWindow(QtWidgets.QMainWindow):
         for key_path, action in self._persistent_actions.items():
             action.toggled.connect(
                 lambda checked, path=key_path: self._apply_setting_change(path, checked)
-            )
-
-    def _on_ai_model_changed(self, model_id: str, /) -> None:
-        self._canvas_widgets.canvas.set_ai_model_name(model_name=model_id)
-        option = _ai_models.find_ai_assist_model_option(model_name=model_id)
-        assert option is not None
-        model_display = option.display_name
-        if self._config["ai"]["default"] == model_display:
-            return
-        self._apply_setting_change(("ai", "default"), model_display)
-
-    def _on_ai_polygon_detail_changed(self, detail: int, /) -> None:
-        self._apply_setting_change(("mask_polygonization", "detail"), detail)
-
-    def _set_point_prompt_mode(self, *, enabled: bool) -> None:
-        self._ai_annotation.set_point_prompt_mode(enabled=enabled)
-        if self._settings_dialog is None:
-            return
-        disabled_reason = self.tr(
-            "Unavailable in AI-Points mode because this model does not support "
-            "point prompts."
-        )
-        for option in _ai_models.AI_ASSIST_MODEL_OPTIONS:
-            self._settings_dialog.set_choice_enabled(
-                key_path=("ai", "default"),
-                value=option.display_name,
-                enabled=not enabled or option.supports_point_prompts,
-                disabled_reason=disabled_reason,
             )
 
     def _set_setting_value(self, *, key_path: tuple[str, ...], value: object) -> None:
@@ -2660,16 +2417,6 @@ class MainWindow(QtWidgets.QMainWindow):
             canvas = self._canvas_widgets.canvas
             canvas.set_show_labels(value=self._config["shape"]["show_labels"])
             canvas.update()
-        elif key_path == ("mask_polygonization", "detail"):
-            detail = self._config["mask_polygonization"]["detail"]
-            self._ai_annotation.set_polygon_detail(detail)
-            self._canvas_widgets.canvas.set_ai_polygon_detail(detail=detail)
-        elif key_path == ("canvas", "allow_out_of_bounds_points"):
-            canvas = self._canvas_widgets.canvas
-            canvas.set_allow_out_of_bounds_points(
-                value=self._config["canvas"]["allow_out_of_bounds_points"]
-            )
-            canvas.update()
         elif key_path[0] == "shape_color":
             self._refresh_shape_colors()
         elif key_path[0] == "labels":
@@ -2717,14 +2464,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 label_history=old_label_dialog.label_history
             )
             old_label_dialog.deleteLater()
-        elif key_path == ("ai", "default"):
-            self._ai_annotation.set_current_model(
-                model_display=self._config["ai"]["default"]
-            )
-        elif key_path == ("ai", "suppress_existing_shape_matches"):
-            self._canvas_widgets.canvas.set_ai_existing_shape_suppression(
-                enabled=self._config["ai"]["suppress_existing_shape_matches"]
-            )
 
     def _refresh_shape_colors(self) -> None:
         unique_labels = self._docks.unique_label_list
@@ -2767,7 +2506,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 open_as_text=self._open_config_file,
                 parent=self,
             )
-        self._set_point_prompt_mode(enabled=self._ai_annotation.is_point_prompt_mode)
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
@@ -2896,34 +2634,50 @@ class MainWindow(QtWidgets.QMainWindow):
             raise ValueError("file_or_dir cannot be empty")
 
         if is_label_file_path(filename=file_or_dir):
-            # Load before dropping the File List, so a failed load leaves the
-            # previous session and File List untouched.
+            # 개별 Label JSON을 직접 연 경우
+            self._opened_as_directory = False
+
             if not self._load_file(image_or_label_path=file_or_dir):
                 return
+
             self._loaded_image_paths = []
             self._refresh_file_list()
             self._docks.file_dock.setEnabled(False)
             self._docks.file_dock.setToolTip(
                 self.tr("File list is disabled when a label file is opened")
             )
+
         elif Path(file_or_dir).is_dir():
+            # Open Dir로 폴더를 연 경우
+            self._opened_as_directory = True
+
             self._import_images_from_dir(root_dir=file_or_dir)
+
             if self.image_list:
-                # Selecting the first row emits no change signal when it is
-                # already current (reopening the same directory), so drive the
-                # reload directly while retaining the prior item for rollback.
                 file_list = self._docks.file_list
                 previous_item = file_list.currentItem()
+
                 with QtCore.QSignalBlocker(file_list):
                     file_list.setCurrentRow(0)
-                self._load_selected_image(file_list.currentItem(), previous_item)
+
+                self._load_selected_image(
+                    file_list.currentItem(),
+                    previous_item,
+                )
                 file_list.repaint()
+
         else:
-            # Load before swapping the File List, so a failed load leaves the
-            # previous session and File List untouched.
+            # Open으로 이미지 하나를 연 경우
+            self._opened_as_directory = False
+
             if not self._load_file(image_or_label_path=file_or_dir):
                 return
-            self._import_images_from_dir(root_dir=str(Path(file_or_dir).parent))
+
+            # 파일 목록에는 같은 폴더의 이미지들을 보여주되,
+            # Export 범위는 계속 "현재 이미지 1개"로 유지
+            self._import_images_from_dir(
+                root_dir=str(Path(file_or_dir).parent)
+            )
 
     def _open_dir_with_dialog(self) -> None:
         if not self._can_continue():
@@ -3070,17 +2824,6 @@ def _shapes_from_dicts(
 
         shapes.append(shape)
     return shapes
-
-
-def _resolve_text_annotation_shape_type(
-    *, create_mode: str, ai_output_format: _automation.AiOutputFormat
-) -> _automation.AiOutputFormat | None:
-    if create_mode in _AI_CREATE_MODES:
-        return ai_output_format
-    if create_mode in typing.get_args(_TextToAnnotationCreateMode):
-        return cast(_TextToAnnotationCreateMode, create_mode)
-    return None
-
 
 def _is_valid_label(
     *, label: str, existing_labels: list[str], policy: str | None

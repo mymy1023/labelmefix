@@ -1446,6 +1446,18 @@ class Canvas(QtWidgets.QWidget):
         pos: QPointF,
         is_shift_pressed: bool,
     ) -> None:
+        if (
+            shape.shape_type == "rectangle"
+            and len(shape.points) == RECTANGLE_POINT_COUNT
+            and 0 <= vertex_index < 4
+        ):
+            self._bounded_move_rectangle_corner(
+                shape=shape,
+                corner_index=vertex_index,
+                pos=pos,
+                is_shift_pressed=is_shift_pressed,
+            )
+            return
         if vertex_index >= len(shape.points):
             logger.warning(
                 "vertex_index is out of range: vertex_index={:d}, len(points)={:d}",
@@ -1474,6 +1486,80 @@ class Canvas(QtWidgets.QWidget):
 
         shape.move_vertex(i=vertex_index, pos=(pos.x(), pos.y()))
 
+    def _bounded_move_rectangle_corner(
+        self,
+        *,
+        shape: Shape,
+        corner_index: int,
+        pos: QPointF,
+        is_shift_pressed: bool,
+    ) -> None:
+        p1, p2 = shape.points
+
+        left = min(float(p1[0]), float(p2[0]))
+        right = max(float(p1[0]), float(p2[0]))
+        top = min(float(p1[1]), float(p2[1]))
+        bottom = max(float(p1[1]), float(p2[1]))
+
+        # 각 귀퉁이의 반대편 고정점
+        opposite = {
+            0: QPointF(right, bottom),  # 좌상 ↔ 우하
+            1: QPointF(left, bottom),   # 우상 ↔ 좌하
+            2: QPointF(left, top),      # 우하 ↔ 좌상
+            3: QPointF(right, top),     # 좌하 ↔ 우상
+        }[corner_index]
+
+        # 이미지 밖으로 나가지 않도록 제한
+        if self._should_constrain_to_pixmap(pos):
+            pos = _compute_intersection_edges_image(
+                p1=opposite,
+                p2=pos,
+                image_size=self.pixmap.size(),
+            )
+
+        # 기존 Rectangle의 Shift 정사각형 기능 유지
+        if is_shift_pressed:
+            pos = _snap_cursor_pos_for_square(
+                pos=pos,
+                opposite_vertex=opposite,
+            )
+
+            if self._should_constrain_to_pixmap(pos):
+                pos = _compute_intersection_edges_image(
+                    p1=opposite,
+                    p2=pos,
+                    image_size=self.pixmap.size(),
+                )
+
+        x = pos.x()
+        y = pos.y()
+        minimum = 1.0
+
+        if corner_index == 0:  # 좌상
+            left = min(x, right - minimum)
+            top = min(y, bottom - minimum)
+
+        elif corner_index == 1:  # 우상
+            right = max(x, left + minimum)
+            top = min(y, bottom - minimum)
+
+        elif corner_index == 2:  # 우하
+            right = max(x, left + minimum)
+            bottom = max(y, top + minimum)
+
+        elif corner_index == 3:  # 좌하
+            left = min(x, right - minimum)
+            bottom = max(y, top + minimum)
+
+        shape.move_vertex(
+            i=0,
+            pos=(left, top),
+        )
+        shape.move_vertex(
+            i=1,
+            pos=(right, bottom),
+        )
+        
     def _bounded_move_oriented_rectangle_vertex(
         self, *, shape: Shape, vertex_index: int, pos: QPointF
     ) -> None:

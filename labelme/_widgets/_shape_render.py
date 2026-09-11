@@ -106,19 +106,80 @@ def render_shape(
 
 
 def _paint_label(
-    *, painter: QtGui.QPainter, shape: Shape, context: ShapeRenderContext
+    *,
+    painter: QtGui.QPainter,
+    shape: Shape,
+    context: ShapeRenderContext,
 ) -> None:
     if not shape.label or len(shape.points) == 0:
         return
-    text = (
-        shape.label if shape.group_id is None else f"{shape.label} ({shape.group_id})"
-    )
-    # Anchor at the points' top-left corner so the label stays close to the
-    # shape and tracks pan/zoom; lift it above the outline stroke.
+
+    # Class | Direction
+    text = shape.label
+
+    direction = shape.other_data.get("direction")
+    if direction:
+        text += f" | {direction}"
+
+    if shape.group_id is not None:
+        text += f" ({shape.group_id})"
+
+    # BBox 좌측 상단
     anchor = shape.points.min(axis=0) * context.scale
-    painter.setPen(QtGui.QPen(context.palette.line))
+
+    metrics = painter.fontMetrics()
+    text_rect = metrics.boundingRect(text)
+
+    padding_x = 5
+    padding_y = 2
+
+    width = text_rect.width() + padding_x * 2
+    height = text_rect.height() + padding_y * 2
+
+    x = float(anchor[0])
+    y = float(anchor[1]) - height - 2
+
+    # 이미지 위쪽 공간이 없으면 BBox 안쪽에 표시
+    if y < 0:
+        y = float(anchor[1]) + 2
+
+    background_rect = QtCore.QRectF(
+        x,
+        y,
+        width,
+        height,
+    )
+
+    # 해당 Class의 BBox 색상을 라벨 배경으로 사용
+    background_color = QtGui.QColor(context.palette.line)
+    background_color.setAlpha(140)
+
+    painter.fillRect(
+        background_rect,
+        background_color,
+    )
+
+    # 밝은 배경이면 검정 글씨, 어두운 배경이면 흰 글씨
+    brightness = (
+        background_color.red() * 0.299
+        + background_color.green() * 0.587
+        + background_color.blue() * 0.114
+    )
+
+    text_color = (
+        QtGui.QColor(0, 0, 0)
+        if brightness > 160
+        else QtGui.QColor(255, 255, 255)
+    )
+
+    painter.setPen(text_color)
+
     painter.drawText(
-        QtCore.QPointF(float(anchor[0]), float(anchor[1]) - _OUTLINE_WIDTH), text
+        QtCore.QPointF(
+            x + padding_x,
+            y + padding_y + metrics.ascent(),
+        ),
+        text,
     )
 
 
@@ -298,6 +359,30 @@ def _build_shape_oriented_rectangle_arrow_path(
     path.moveTo(tail)
     path.lineTo(tip)
 
+def rectangle_corners(
+    *, shape: Shape
+) -> npt.NDArray[np.float64]:
+    """Return rectangle corners: TL, TR, BR, BL."""
+
+    assert shape.shape_type == "rectangle"
+    assert len(shape.points) == RECTANGLE_POINT_COUNT
+
+    p1, p2 = shape.points
+
+    left = min(float(p1[0]), float(p2[0]))
+    right = max(float(p1[0]), float(p2[0]))
+    top = min(float(p1[1]), float(p2[1]))
+    bottom = max(float(p1[1]), float(p2[1]))
+
+    return np.array(
+        [
+            [left, top],       # 0: 좌상
+            [right, top],      # 1: 우상
+            [right, bottom],   # 2: 우하
+            [left, bottom],    # 3: 좌하
+        ],
+        dtype=np.float64,
+    )
 
 def _build_shape_points_paths(
     *,
@@ -310,10 +395,29 @@ def _build_shape_points_paths(
     if shape.shape_type in ["rectangle", "mask"]:
         assert len(points) in [1, 2]
         paths.line.addPath(_build_two_point_outline(shape=shape, scale=scale))
-        if shape.shape_type == "rectangle":
-            for i in range(len(points)):
-                _build_shape_point_path(
-                    path=paths.vertices, shape=shape, context=context, vertex_index=i
+
+        if (
+            shape.shape_type == "rectangle"
+            and len(points) == RECTANGLE_POINT_COUNT
+        ):
+            corners = rectangle_corners(shape=shape)
+
+            for i, corner in enumerate(corners):
+                size = context.point_size
+
+                if (
+                    context.highlight is not None
+                    and context.highlight.index == i
+                ):
+                    size *= context.highlight.size_factor
+
+                pos = QtCore.QPointF(*(corner * scale))
+
+                _draw_vertex(
+                    path=paths.vertices,
+                    pos=pos,
+                    size=size,
+                    point_type="round",
                 )
     elif shape.shape_type == "oriented_rectangle":
         assert len(points) in [1, 2, 4]

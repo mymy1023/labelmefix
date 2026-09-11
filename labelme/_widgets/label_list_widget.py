@@ -198,6 +198,25 @@ class LabelListWidget(QtWidgets.QListView):
         self.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        # Make selected shapes clearly visible
+        palette = self.palette()
+
+        for color_group in (
+            QtGui.QPalette.ColorGroup.Active,
+            QtGui.QPalette.ColorGroup.Inactive,
+        ):
+            palette.setColor(
+                color_group,
+                QtGui.QPalette.ColorRole.Highlight,
+                QtGui.QColor("#0D47A1"),
+            )
+            palette.setColor(
+                color_group,
+                QtGui.QPalette.ColorRole.HighlightedText,
+                QtGui.QColor("#FFFFFF"),
+            )
+
+        self.setPalette(palette)
         self.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
 

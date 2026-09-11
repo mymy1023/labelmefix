@@ -14,6 +14,7 @@ from .._shape import nearest_edge_index
 from .._shape import nearest_rotation_point_index
 from .._shape import nearest_vertex_index
 from ._shape_render import is_hit_by_point
+from ._shape_render import rectangle_corners
 
 
 class HitKind(enum.Enum):
@@ -29,6 +30,25 @@ class HitTarget:
     shape: Shape
     index: int | None
 
+def _nearest_rectangle_corner_index(
+    *,
+    shape: Shape,
+    point: npt.NDArray[np.float64],
+    image_epsilon: float,
+) -> int | None:
+    corners = rectangle_corners(shape=shape)
+
+    distances = np.linalg.norm(
+        corners - point,
+        axis=1,
+    )
+
+    index = int(np.argmin(distances))
+
+    if distances[index] <= image_epsilon:
+        return index
+
+    return None
 
 def find_hover_target(
     *,
@@ -50,11 +70,28 @@ def find_hover_target(
 
     # Pass 1: vertex proximity
     for shape in candidates:
-        idx = nearest_vertex_index(
-            shape=shape, point=point, image_epsilon=image_epsilon
-        )
+        if (
+            shape.shape_type == "rectangle"
+            and len(shape.points) == 2
+        ):
+            idx = _nearest_rectangle_corner_index(
+                shape=shape,
+                point=point,
+                image_epsilon=image_epsilon,
+            )
+        else:
+            idx = nearest_vertex_index(
+                shape=shape,
+                point=point,
+                image_epsilon=image_epsilon,
+            )
+
         if idx is not None:
-            return HitTarget(kind=HitKind.VERTEX, shape=shape, index=idx)
+            return HitTarget(
+                kind=HitKind.VERTEX,
+                shape=shape,
+                index=idx,
+            )
 
     # Pass 2: rotation handle proximity
     for shape in candidates:
