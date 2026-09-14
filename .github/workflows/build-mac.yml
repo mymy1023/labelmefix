@@ -1,0 +1,47 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pyinstaller
+
+      - name: Build macOS App
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onefile \
+            --windowed \
+            --name LabelmeBBox \
+            --collect-all labelme \
+            --collect-all osam \
+            launcher.py
+
+      - name: Zip macOS App
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/LabelmeBBox.app \
+            LabelmeBBox-macOS.zip
+
+      - name: Upload macOS App
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabelmeBBox-macOS
+          path: LabelmeBBox-macOS.zip
