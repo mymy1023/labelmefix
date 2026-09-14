@@ -182,7 +182,6 @@ class MainWindow(QtWidgets.QMainWindow):
     _docks: _DockWidgets
     _actions: _Actions
     _persistent_actions: dict[tuple[str, ...], QtGui.QAction]
-    _navigation_shortcuts: list[QtGui.QShortcut]
     _menus: _Menus
     _label_dialog: LabelDialog
     _settings_dialog: SettingsDialog | None = None
@@ -231,7 +230,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._canvas_widgets = self._setup_canvas()
 
         self._actions = self._setup_actions()
-        self._navigation_shortcuts = self._setup_navigation_shortcuts()
 
         self._persistent_actions = {
             ("auto_save",): self._actions.save_auto,
@@ -287,35 +285,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 widget.setStyleSheet(sheet)  # re-resolve palette refs; also repaints
             else:
                 widget.update()
-                
-    def _setup_navigation_shortcuts(self) -> list[QtGui.QShortcut]:
-        shortcuts: list[QtGui.QShortcut] = []
-
-        prev_shortcut = QtGui.QShortcut(
-            QtGui.QKeySequence("A"),
-            self,
-        )
-        prev_shortcut.setContext(
-            QtCore.Qt.ShortcutContext.ApplicationShortcut
-        )
-        prev_shortcut.activated.connect(
-            self._open_prev_image
-        )
-        shortcuts.append(prev_shortcut)
-
-        next_shortcut = QtGui.QShortcut(
-            QtGui.QKeySequence("D"),
-            self,
-        )
-        next_shortcut.setContext(
-            QtCore.Qt.ShortcutContext.ApplicationShortcut
-        )
-        next_shortcut.activated.connect(
-            self._open_next_image
-        )
-        shortcuts.append(next_shortcut)
-
-        return shortcuts
 
     def _setup_actions(self) -> _Actions:
         action = functools.partial(_utils.new_action, self)
