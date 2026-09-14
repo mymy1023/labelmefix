@@ -34,6 +34,24 @@ jobs:
             --collect-all osam \
             launcher.py
 
+      - name: Test macOS App Launch
+        run: |
+          APP_BIN="dist/LabelmeBBox.app/Contents/MacOS/LabelmeBBox"
+
+          "$APP_BIN" > /tmp/labelme.log 2>&1 &
+          PID=$!
+
+          sleep 10
+
+          if kill -0 $PID 2>/dev/null; then
+            echo "LabelmeBBox.app started successfully."
+            kill $PID
+          else
+            echo "LabelmeBBox.app failed to start."
+            cat /tmp/labelme.log
+            exit 1
+          fi
+
       - name: Zip macOS App
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
