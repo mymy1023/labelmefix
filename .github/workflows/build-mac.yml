@@ -61,5 +61,5 @@ jobs:
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
-          name: LabelmeBBox-macOS
           path: LabelmeBBox-macOS.tar.gz
+          archive: false
