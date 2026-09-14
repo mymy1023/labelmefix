@@ -50,6 +50,7 @@ class LabelDialog(QtWidgets.QDialog):
         self.setAccessibleName(dialog_name)
 
         self._sort_labels = sort_labels
+        self._show_text_field = show_text_field
         self._flags_spec = compile_label_flags(label_flags=flags)
         self._label_history = label_history[:] if label_history is not None else []
         self._attribute_specs = shape_attributes or []
@@ -182,7 +183,7 @@ class LabelDialog(QtWidgets.QDialog):
             top_row.addWidget(self.edit_group_id, stretch=1)
             main_layout.addLayout(top_row)
         else:
-            self.edit.setParent(None)
+            self.edit.hide()
 
         selection_layout = QtWidgets.QGridLayout()
         selection_layout.setHorizontalSpacing(6)
@@ -454,7 +455,12 @@ class LabelDialog(QtWidgets.QDialog):
         self._fit_label_list_to_content()
         self.adjustSize()
         self._refresh_ok_button()
-        self.edit.setFocus(QtCore.Qt.FocusReason.PopupFocusReason)
+        self._refresh_ok_button()
+
+        if self._show_text_field:
+            self.edit.setFocus(QtCore.Qt.FocusReason.PopupFocusReason)
+        else:
+            self.label_list.setFocus(QtCore.Qt.FocusReason.PopupFocusReason)
 
         if move:
             target = position if position is not None else QtGui.QCursor.pos()

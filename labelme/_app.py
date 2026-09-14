@@ -182,6 +182,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _docks: _DockWidgets
     _actions: _Actions
     _persistent_actions: dict[tuple[str, ...], QtGui.QAction]
+    _navigation_shortcuts: list[QtGui.QShortcut]
     _menus: _Menus
     _label_dialog: LabelDialog
     _settings_dialog: SettingsDialog | None = None
@@ -230,6 +231,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._canvas_widgets = self._setup_canvas()
 
         self._actions = self._setup_actions()
+        self._navigation_shortcuts = self._setup_navigation_shortcuts()
+
         self._persistent_actions = {
             ("auto_save",): self._actions.save_auto,
             ("with_image_data",): self._actions.save_with_image_data,
@@ -284,6 +287,35 @@ class MainWindow(QtWidgets.QMainWindow):
                 widget.setStyleSheet(sheet)  # re-resolve palette refs; also repaints
             else:
                 widget.update()
+                
+    def _setup_navigation_shortcuts(self) -> list[QtGui.QShortcut]:
+        shortcuts: list[QtGui.QShortcut] = []
+
+        prev_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence("A"),
+            self,
+        )
+        prev_shortcut.setContext(
+            QtCore.Qt.ShortcutContext.WindowShortcut
+        )
+        prev_shortcut.activated.connect(
+            self._open_prev_image
+        )
+        shortcuts.append(prev_shortcut)
+
+        next_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence("D"),
+            self,
+        )
+        next_shortcut.setContext(
+            QtCore.Qt.ShortcutContext.WindowShortcut
+        )
+        next_shortcut.activated.connect(
+            self._open_next_image
+        )
+        shortcuts.append(next_shortcut)
+
+        return shortcuts
 
     def _setup_actions(self) -> _Actions:
         action = functools.partial(_utils.new_action, self)
@@ -2030,10 +2062,11 @@ class MainWindow(QtWidgets.QMainWindow):
             is_initial_load=True,
         )
         self.update_action_states(value=True)
-        # A load never pulls the keyboard out of the File List, whatever drove
-        # it; otherwise an arrow-key walk of the list ends after one keypress.
-        if not self._docks.file_list.hasFocus():
-            self._canvas_widgets.canvas.setFocus()
+        # Keep keyboard shortcuts such as A / D working consistently
+        # across Windows and macOS after an image is loaded.
+        self._canvas_widgets.canvas.setFocus(
+            QtCore.Qt.FocusReason.OtherFocusReason
+        )
         self.show_status_message(self.tr("Loaded %s") % Path(image_or_label_path).name)
         logger.info(
             "Loaded file: {!r} in {:.0f}ms",
