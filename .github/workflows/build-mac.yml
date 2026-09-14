@@ -52,14 +52,14 @@ jobs:
             exit 1
           fi
 
-      - name: Zip macOS App
+      - name: Package macOS App as TAR
         run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            dist/LabelmeBBox.app \
-            LabelmeBBox-macOS.zip
+          tar -czf LabelmeBBox-macOS.tar.gz \
+            -C dist \
+            LabelmeBBox.app
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
           name: LabelmeBBox-macOS
-          path: LabelmeBBox-macOS.zip
+          path: LabelmeBBox-macOS.tar.gz
