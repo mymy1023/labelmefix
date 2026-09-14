@@ -296,7 +296,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self,
         )
         prev_shortcut.setContext(
-            QtCore.Qt.ShortcutContext.WindowShortcut
+            QtCore.Qt.ShortcutContext.ApplicationShortcut
         )
         prev_shortcut.activated.connect(
             self._open_prev_image
@@ -308,7 +308,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self,
         )
         next_shortcut.setContext(
-            QtCore.Qt.ShortcutContext.WindowShortcut
+            QtCore.Qt.ShortcutContext.ApplicationShortcut
         )
         next_shortcut.activated.connect(
             self._open_next_image
@@ -2352,9 +2352,33 @@ class MainWindow(QtWidgets.QMainWindow):
     def _make_label_dialog(self, *, label_history: list[str] | None) -> LabelDialog:
         return LabelDialog(
             parent=self,
-            labels=self._config["labels"],
-            shape_attributes=self._config["shape_attributes"],
-            sort_labels=self._config["sort_labels"],
+            labels=[
+                "person",
+                "soldier",
+                "rifle",
+                "heavyweapon",
+                "antitank",
+                "vehicle",
+                "lighttact",
+                "tank",
+                "selfprop",
+                "armored",
+                "turr-s",
+                "turr-a",
+            ],
+            shape_attributes=[
+                {
+                    "key": "direction",
+                    "label": "Direction",
+                    "options": [
+                        "front",
+                        "side",
+                        "rear",
+                        "unknown",
+                    ],
+                }
+            ],
+            sort_labels=False,
             show_text_field=False,
             completion=self._config["label_completion"],
             fit_to_content=self._config["fit_to_content"],
