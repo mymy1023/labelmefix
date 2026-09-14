@@ -541,7 +541,6 @@ class LabelDialog(QtWidgets.QDialog):
         if not lists:
             return
 
-        # 가장 많은 항목 수 기준
         max_count = max(
             list_widget.count()
             for list_widget in lists
@@ -550,19 +549,25 @@ class LabelDialog(QtWidgets.QDialog):
         if max_count == 0:
             return
 
-        # Class의 행 높이를 기준으로 전체 높이 계산
+        # macOS에서도 안정적으로 동작하도록
+        # sizeHintForRow()에만 의존하지 않음
         row_height = self.label_list.sizeHintForRow(0)
+
+        if row_height <= 0:
+            row_height = self.label_list.fontMetrics().height() + 8
 
         height = (
             row_height * max_count
             + self.label_list.frameWidth() * 2
-            + 4
+            + 8
         )
 
-        # 모든 목록을 동일 크기로
+        # 너무 작거나 지나치게 커지지 않도록 제한
+        height = max(180, min(height, 360))
+
         for list_widget in lists:
-            list_widget.setFixedHeight(height)
             list_widget.setMinimumWidth(220)
+            list_widget.setFixedHeight(height)
 
     def _move_within_screen(self, target: QtCore.QPoint, /) -> None:
         self.adjustSize()

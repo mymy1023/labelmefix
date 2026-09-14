@@ -2355,7 +2355,7 @@ class MainWindow(QtWidgets.QMainWindow):
             labels=self._config["labels"],
             shape_attributes=self._config["shape_attributes"],
             sort_labels=self._config["sort_labels"],
-            show_text_field=self._config["show_label_text_field"],
+            show_text_field=False,
             completion=self._config["label_completion"],
             fit_to_content=self._config["fit_to_content"],
             flags=self._config["label_flags"],
