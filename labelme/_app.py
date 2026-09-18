@@ -61,15 +61,18 @@ from ._widgets import ZoomWidget
 from ._widgets import format_shape_label
 from ._widgets.label_list_widget import LABEL_COLOR_ROLE
 
+
 class _ZoomMode(enum.Enum):
     FIT_WINDOW = enum.auto()
     FIT_WIDTH = enum.auto()
     MANUAL_ZOOM = enum.auto()
 
+
 # Keys of the Window State store, shared by the restore, reset, and close paths.
 WINDOW_SIZE_KEY: Final[str] = "window/size"
 WINDOW_POSITION_KEY: Final[str] = "window/position"
 WINDOW_LAYOUT_KEY: Final[str] = "window/state"
+
 
 class _StatusBarWidgets(NamedTuple):
     message: QtWidgets.QLabel
@@ -155,6 +158,7 @@ class _Actions(NamedTuple):
     on_shapes_present: tuple[QtGui.QAction, ...]
     context_menu: tuple[QtGui.QAction, ...]
     edit_menu: tuple[QtGui.QAction, ...]
+
 
 class _Menus(NamedTuple):
     file: QtWidgets.QMenu
@@ -669,13 +673,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._canvas_widgets.canvas.edge_selected.connect(add_point_to_edge.setEnabled)
 
         draw = [
-#            ("polygon", create_mode),
+            #            ("polygon", create_mode),
             ("rectangle", create_rectangle_mode),
-#            ("oriented_rectangle", create_oriented_rectangle_mode),
-#            ("circle", create_circle_mode),
-#            ("point", create_point_mode),
-#            ("line", create_line_mode),
-#            ("linestrip", create_line_strip_mode),
+            #            ("oriented_rectangle", create_oriented_rectangle_mode),
+            #            ("circle", create_circle_mode),
+            #            ("point", create_point_mode),
+            #            ("line", create_line_mode),
+            #            ("linestrip", create_line_strip_mode),
         ]
         zoom = (
             self._canvas_widgets.zoom_widget,
@@ -905,9 +909,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._actions.open_next_img,
                     self._actions.save,
                     self._actions.delete_file,
-
                     separator(),
-
                     self._actions.create_rectangle_mode,
                     self._actions.edit_mode,
                     self._actions.duplicate,
@@ -918,7 +920,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 font_base=self.font(),
             ),
         )
-            
+
     def _setup_app_state(
         self,
         *,
@@ -1386,7 +1388,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for field in typing.get_args(LabelDialogField):
                 if field not in locked:
                     setattr(shape, field, getattr(entry, field))
-            
+
             attributes = dict(shape.other_data)
             attributes.update(entry.attributes)
 
@@ -1394,7 +1396,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 entry.label,
                 attributes,
             )
-            
+
             assert shape.label is not None
             fill_rgb = self._get_rgb_by_label(
                 label=shape.label,
@@ -2049,9 +2051,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_action_states(value=True)
         # Keep keyboard shortcuts such as A / D working consistently
         # across Windows and macOS after an image is loaded.
-        self._canvas_widgets.canvas.setFocus(
-            QtCore.Qt.FocusReason.OtherFocusReason
-        )
+        self._canvas_widgets.canvas.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
         self.show_status_message(self.tr("Loaded %s") % Path(image_or_label_path).name)
         logger.info(
             "Loaded file: {!r} in {:.0f}ms",
@@ -2694,9 +2694,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # 파일 목록에는 같은 폴더의 이미지들을 보여주되,
             # Export 범위는 계속 "현재 이미지 1개"로 유지
-            self._import_images_from_dir(
-                root_dir=str(Path(file_or_dir).parent)
-            )
+            self._import_images_from_dir(root_dir=str(Path(file_or_dir).parent))
 
     def _open_dir_with_dialog(self) -> None:
         if not self._can_continue():
@@ -2809,6 +2807,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         self._status_bar.stats.setText(" | ".join(stats))
 
+
 def _shapes_from_dicts(
     *,
     shape_dicts: list[ShapeDict],
@@ -2851,6 +2850,7 @@ def _shapes_from_dicts(
         shapes.append(shape)
 
     return shapes
+
 
 def _is_valid_label(
     *, label: str, existing_labels: list[str], policy: str | None

@@ -44,8 +44,7 @@ class LabelDialog(QtWidgets.QDialog):
         flags: dict[str, list[str]] | None = None,
         label_history: list[str] | None = None,
         annotation_rules: AnnotationRules | None = None,
-        ) -> None:
-
+    ) -> None:
         super().__init__(parent)
         dialog_name = self.tr("Shape Label")
         self.setWindowTitle(dialog_name)
@@ -58,9 +57,7 @@ class LabelDialog(QtWidgets.QDialog):
         self._annotation_rules = annotation_rules
 
         if self._annotation_rules is not None:
-            self._attribute_specs = (
-                self._annotation_rules.ui_attribute_specs()
-            )
+            self._attribute_specs = self._annotation_rules.ui_attribute_specs()
         else:
             self._attribute_specs = shape_attributes or []
 
@@ -120,10 +117,20 @@ class LabelDialog(QtWidgets.QDialog):
         self._weapon_direction_layout = QtWidgets.QVBoxLayout()
         self._weapon_direction_layout.setContentsMargins(0, 0, 0, 0)
         self._weapon_direction_layout.setSpacing(4)
-        self._weapon_direction_container.setLayout(
-            self._weapon_direction_layout
+        self._weapon_direction_container.setLayout(self._weapon_direction_layout)
+
+        self._weapon_direction_placeholder = QtWidgets.QListWidget()
+        self._weapon_direction_placeholder.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
         )
-        
+        self._weapon_direction_placeholder.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._weapon_direction_placeholder.setEnabled(False)
+
+        self._weapon_direction_layout.addWidget(
+            self._weapon_direction_placeholder,
+            1,
+        )
+
         # Build custom attribute lists
         for spec in self._attribute_specs:
             key = spec["key"]
@@ -139,7 +146,7 @@ class LabelDialog(QtWidgets.QDialog):
             )
 
             self._attribute_lists[key] = attribute_list
-            
+
         # Make selected items clearly visible
         for list_widget in [
             self.label_list,
@@ -163,7 +170,7 @@ class LabelDialog(QtWidgets.QDialog):
                 )
 
             list_widget.setPalette(palette)
-            
+
         # Configure label list
         if sort_labels:
             self.label_list.setDragDropMode(
@@ -256,7 +263,7 @@ class LabelDialog(QtWidgets.QDialog):
                     1,
                     column,
                 )
-        
+
         for column in range(1 + len(self._attribute_specs)):
             selection_layout.setColumnStretch(column, 1)
 
@@ -282,18 +289,15 @@ class LabelDialog(QtWidgets.QDialog):
         # Connect signals
         self.edit.textChanged.connect(self._on_text_changed)
         self.label_list.currentItemChanged.connect(self._on_label_selected)
-        
+
         for key, attribute_list in self._attribute_lists.items():
             if key == "무기타입":
                 attribute_list.itemSelectionChanged.connect(
                     self._on_weapon_type_selection_changed
                 )
             else:
-                attribute_list.currentItemChanged.connect(
-                    self._on_attribute_changed
-                )
+                attribute_list.currentItemChanged.connect(self._on_attribute_changed)
 
-        
         # Populate initial labels
         for label in dict.fromkeys([*(labels or []), *self._label_history]):
             self.label_list.addItem(label)
@@ -305,7 +309,7 @@ class LabelDialog(QtWidgets.QDialog):
     @property
     def label_history(self) -> list[str]:
         return self._label_history[:]
-    
+
     @staticmethod
     def _option_text(value: object) -> str:
         if value == "None":
@@ -319,7 +323,6 @@ class LabelDialog(QtWidgets.QDialog):
 
         return str(value)
 
-
     def _populate_attribute_list(
         self,
         attribute_list: QtWidgets.QListWidget,
@@ -331,9 +334,7 @@ class LabelDialog(QtWidgets.QDialog):
         selected_item = None
 
         for option in options:
-            item = QtWidgets.QListWidgetItem(
-                self._option_text(option)
-            )
+            item = QtWidgets.QListWidgetItem(self._option_text(option))
             item.setData(
                 QtCore.Qt.ItemDataRole.UserRole,
                 option,
@@ -353,7 +354,6 @@ class LabelDialog(QtWidgets.QDialog):
             attribute_list.setCurrentRow(-1)
             attribute_list.clearSelection()
 
-        
     def _apply_attribute_rules(
         self,
         label: str,
@@ -369,20 +369,13 @@ class LabelDialog(QtWidgets.QDialog):
         try:
             self._active_label = label
 
-            layout_keys = (
-                self._annotation_rules
-                .layout_attribute_keys(label)
-            )
+            layout_keys = self._annotation_rules.layout_attribute_keys(label)
 
-            self._layout_attribute_keys = set(
-                layout_keys
-            )
+            self._layout_attribute_keys = set(layout_keys)
 
             self._required_attribute_keys.clear()
 
-            for key, attribute_list in (
-                self._attribute_lists.items()
-            ):
+            for key, attribute_list in self._attribute_lists.items():
                 title_label = self._attribute_labels[key]
                 column = self._attribute_columns[key]
 
@@ -392,9 +385,7 @@ class LabelDialog(QtWidgets.QDialog):
                     continue
 
                 if key not in self._layout_attribute_keys:
-                    with QtCore.QSignalBlocker(
-                        attribute_list
-                    ):
+                    with QtCore.QSignalBlocker(attribute_list):
                         attribute_list.clear()
                         attribute_list.clearSelection()
                         attribute_list.setCurrentRow(-1)
@@ -416,36 +407,24 @@ class LabelDialog(QtWidgets.QDialog):
                     1,
                 )
 
-                options = (
-                    self._annotation_rules
-                    .options_for(
-                        label,
-                        key,
-                    )
+                options = self._annotation_rules.options_for(
+                    label,
+                    key,
                 )
 
                 if key == "무기타입":
-                    if (
-                        self._annotation_rules
-                        .allows_multiple_weapon_types(label)
-                    ):
+                    if self._annotation_rules.allows_multiple_weapon_types(label):
                         selection_mode = (
-                            QtWidgets.QAbstractItemView
-                            .SelectionMode.MultiSelection
+                            QtWidgets.QAbstractItemView.SelectionMode.MultiSelection
                         )
                     else:
                         selection_mode = (
-                            QtWidgets.QAbstractItemView
-                            .SelectionMode.SingleSelection
+                            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
                         )
 
-                    attribute_list.setSelectionMode(
-                        selection_mode
-                    )
+                    attribute_list.setSelectionMode(selection_mode)
 
-                with QtCore.QSignalBlocker(
-                    attribute_list
-                ):
+                with QtCore.QSignalBlocker(attribute_list):
                     self._populate_attribute_list(
                         attribute_list,
                         options,
@@ -458,12 +437,8 @@ class LabelDialog(QtWidgets.QDialog):
                 attribute_list.setEnabled(True)
                 self._required_attribute_keys.add(key)
 
-            direction_label = self._attribute_labels.get(
-                "무기방향"
-            )
-            direction_column = self._attribute_columns.get(
-                "무기방향"
-            )
+            direction_label = self._attribute_labels.get("무기방향")
+            direction_column = self._attribute_columns.get("무기방향")
 
             if "무기방향" in self._layout_attribute_keys:
                 if direction_label is not None:
@@ -491,16 +466,13 @@ class LabelDialog(QtWidgets.QDialog):
                         0,
                     )
 
-            self._last_weapon_type_selection = tuple(
-                self._selected_weapon_types()
-            )
+            self._last_weapon_type_selection = tuple(self._selected_weapon_types())
 
             self._refresh_ok_button()
             self._fit_label_list_to_content()
 
         finally:
             self._updating_attributes = False
-
 
     def _select_attribute_value(
         self,
@@ -549,8 +521,7 @@ class LabelDialog(QtWidgets.QDialog):
 
     def _refresh_ok_button(self) -> None:
         label_selected = (
-            "label" in self._locked
-            or self.label_list.currentItem() is not None
+            "label" in self._locked or self.label_list.currentItem() is not None
         )
 
         attributes_selected = True
@@ -570,16 +541,12 @@ class LabelDialog(QtWidgets.QDialog):
                     attributes_selected = False
                     break
 
-        directions_valid = (
-            self._weapon_directions_are_valid()
-        )
+        directions_valid = self._weapon_directions_are_valid()
 
         self._ok_button.setEnabled(
-            label_selected
-            and attributes_selected
-            and directions_valid
+            label_selected and attributes_selected and directions_valid
         )
-        
+
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent, /) -> bool:
         if watched is self.edit and event.type() == QtCore.QEvent.Type.KeyPress:
             assert isinstance(event, QtGui.QKeyEvent)
@@ -722,9 +689,7 @@ class LabelDialog(QtWidgets.QDialog):
         # Select the stored class without firing _on_label_selected while
         # attributes are being restored.
         with QtCore.QSignalBlocker(self.label_list):
-            self.label_list.setCurrentRow(
-                self._find_label_row(text)
-            )
+            self.label_list.setCurrentRow(self._find_label_row(text))
 
         self._apply_attribute_rules(text)
 
@@ -741,10 +706,7 @@ class LabelDialog(QtWidgets.QDialog):
         # 무기타입 복원
         weapon_types = attributes.get("무기타입")
 
-        if (
-            "무기타입" in self._layout_attribute_keys
-            and weapon_types is not None
-        ):
+        if "무기타입" in self._layout_attribute_keys and weapon_types is not None:
             self._set_weapon_type_values(weapon_types)
 
         # 차량 무기방향 복원.
@@ -757,30 +719,20 @@ class LabelDialog(QtWidgets.QDialog):
             else:
                 type_values = [weapon_types]
 
-            raw_directions = attributes.get(
-                "무기방향"
-            )
+            raw_directions = attributes.get("무기방향")
 
             if isinstance(raw_directions, list):
-                direction_values = list(
-                    raw_directions
-                )
+                direction_values = list(raw_directions)
             elif raw_directions is None:
                 direction_values = []
             else:
-                direction_values = [
-                    raw_directions
-                ]
+                direction_values = [raw_directions]
 
             direction_by_type: dict[object, object] = {}
 
-            for index, weapon_type in enumerate(
-                type_values
-            ):
+            for index, weapon_type in enumerate(type_values):
                 direction = (
-                    direction_values[index]
-                    if index < len(direction_values)
-                    else None
+                    direction_values[index] if index < len(direction_values) else None
                 )
 
                 direction_by_type[weapon_type] = direction
@@ -862,34 +814,27 @@ class LabelDialog(QtWidgets.QDialog):
 
     def _collect_flags(self) -> dict[str, bool]:
         return {key: cb.isChecked() for key, cb in self._flag_checkboxes.items()}
-    
+
     def _collect_attributes(
         self,
     ) -> dict[str, object]:
         attributes: dict[str, object] = {}
 
         # 시선방향
-        direction_list = self._attribute_lists.get(
-            "시선방향"
-        )
+        direction_list = self._attribute_lists.get("시선방향")
 
         if direction_list is not None:
             item = direction_list.currentItem()
 
             if item is not None:
-                attributes["시선방향"] = item.data(
-                    QtCore.Qt.ItemDataRole.UserRole
-                )
+                attributes["시선방향"] = item.data(QtCore.Qt.ItemDataRole.UserRole)
 
         weapon_types = self._selected_weapon_types()
 
         # --------------------------------------------------
         # 차량
         # --------------------------------------------------
-        if (
-            "무기방향"
-            in self._layout_attribute_keys
-        ):
+        if "무기방향" in self._layout_attribute_keys:
             if not weapon_types:
                 return attributes
 
@@ -900,11 +845,7 @@ class LabelDialog(QtWidgets.QDialog):
                     weapon_directions.append(None)
                     continue
 
-                direction_list = (
-                    self._weapon_direction_lists.get(
-                        weapon_type
-                    )
-                )
+                direction_list = self._weapon_direction_lists.get(weapon_type)
 
                 direction = None
 
@@ -912,13 +853,9 @@ class LabelDialog(QtWidgets.QDialog):
                     item = direction_list.currentItem()
 
                     if item is not None:
-                        direction = item.data(
-                            QtCore.Qt.ItemDataRole.UserRole
-                        )
+                        direction = item.data(QtCore.Qt.ItemDataRole.UserRole)
 
-                weapon_directions.append(
-                    direction
-                )
+                weapon_directions.append(direction)
 
             # 실제 복수 선택된 경우에만 list
             if len(weapon_types) >= 2:
@@ -939,15 +876,13 @@ class LabelDialog(QtWidgets.QDialog):
             attributes["무기타입"] = weapon_types[0]
 
         return attributes
-    
+
     def _fit_label_list_to_content(self) -> None:
         lists = [
             self.label_list,
         ]
 
-        for key, attribute_list in (
-            self._attribute_lists.items()
-        ):
+        for key, attribute_list in self._attribute_lists.items():
             if key not in self._layout_attribute_keys:
                 continue
 
@@ -957,30 +892,16 @@ class LabelDialog(QtWidgets.QDialog):
             lists.append(attribute_list)
 
         max_count = max(
-            (
-                list_widget.count()
-                for list_widget in lists
-            ),
+            (list_widget.count() for list_widget in lists),
             default=1,
         )
 
-        row_height = (
-            self.label_list.sizeHintForRow(0)
-        )
+        row_height = self.label_list.sizeHintForRow(0)
 
         if row_height <= 0:
-            row_height = (
-                self.label_list
-                .fontMetrics()
-                .height()
-                + 8
-            )
+            row_height = self.label_list.fontMetrics().height() + 8
 
-        height = (
-            row_height * max_count
-            + self.label_list.frameWidth() * 2
-            + 8
-        )
+        height = row_height * max_count + self.label_list.frameWidth() * 2 + 8
 
         height = max(
             180,
@@ -993,9 +914,7 @@ class LabelDialog(QtWidgets.QDialog):
 
         if "무기방향" in self._layout_attribute_keys:
             self._weapon_direction_container.setMinimumWidth(220)
-            self._weapon_direction_container.setFixedHeight(
-                height
-            )
+            self._weapon_direction_container.setFixedHeight(height)
 
     def _move_within_screen(self, target: QtCore.QPoint, /) -> None:
         self.adjustSize()
@@ -1023,26 +942,22 @@ class LabelDialog(QtWidgets.QDialog):
         dy = max(dy, available.top() - frame.top())
         if dx or dy:
             self.move(self.x() + dx, self.y() + dy)
-    
+
     def _current_attributes(
         self,
     ) -> dict[str, object]:
         attributes: dict[str, object] = {}
 
-        for key, attribute_list in (
-            self._attribute_lists.items()
-        ):
+        for key, attribute_list in self._attribute_lists.items():
             item = attribute_list.currentItem()
 
             if item is None:
                 continue
 
-            attributes[key] = item.data(
-                QtCore.Qt.ItemDataRole.UserRole
-            )
+            attributes[key] = item.data(QtCore.Qt.ItemDataRole.UserRole)
 
         return attributes
-    
+
     def _on_attribute_changed(
         self,
         _current: QtWidgets.QListWidgetItem | None,
@@ -1052,13 +967,11 @@ class LabelDialog(QtWidgets.QDialog):
             return
 
         self._refresh_ok_button()
-    
+
     def _selected_weapon_types(
         self,
     ) -> list[object]:
-        weapon_list = self._attribute_lists.get(
-            "무기타입"
-        )
+        weapon_list = self._attribute_lists.get("무기타입")
 
         if weapon_list is None:
             return []
@@ -1070,32 +983,21 @@ class LabelDialog(QtWidgets.QDialog):
             item = weapon_list.item(row)
 
             if item.isSelected():
-                values.append(
-                    item.data(
-                        QtCore.Qt.ItemDataRole.UserRole
-                    )
-                )
+                values.append(item.data(QtCore.Qt.ItemDataRole.UserRole))
 
         return values
 
     def _weapon_directions_are_valid(
         self,
     ) -> bool:
-        if (
-            "무기방향"
-            not in self._layout_attribute_keys
-        ):
+        if "무기방향" not in self._layout_attribute_keys:
             return True
 
         for weapon_type in self._selected_weapon_types():
             if weapon_type == "None":
                 continue
 
-            direction_list = (
-                self._weapon_direction_lists.get(
-                    weapon_type
-                )
-            )
+            direction_list = self._weapon_direction_lists.get(weapon_type)
 
             # 방향 선택지가 없는 무기라면 방향 입력을 요구하지 않습니다.
             if direction_list is None:
@@ -1110,9 +1012,7 @@ class LabelDialog(QtWidgets.QDialog):
         self,
         values: object,
     ) -> None:
-        weapon_list = self._attribute_lists.get(
-            "무기타입"
-        )
+        weapon_list = self._attribute_lists.get("무기타입")
 
         if weapon_list is None:
             return
@@ -1138,9 +1038,7 @@ class LabelDialog(QtWidgets.QDialog):
             for row in range(weapon_list.count()):
                 item = weapon_list.item(row)
 
-                value = item.data(
-                    QtCore.Qt.ItemDataRole.UserRole
-                )
+                value = item.data(QtCore.Qt.ItemDataRole.UserRole)
 
                 if value not in target_values:
                     continue
@@ -1151,10 +1049,8 @@ class LabelDialog(QtWidgets.QDialog):
                     weapon_list.setCurrentItem(item)
                     break
 
-        self._last_weapon_type_selection = tuple(
-            self._selected_weapon_types()
-        )
-    
+        self._last_weapon_type_selection = tuple(self._selected_weapon_types())
+
     def _clear_weapon_direction_lists(
         self,
     ) -> None:
@@ -1168,10 +1064,26 @@ class LabelDialog(QtWidgets.QDialog):
 
             widget = item.widget()
 
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
-    
+            if widget is None:
+                continue
+
+            # 빈 방향 박스는 삭제하지 않음
+            if widget is self._weapon_direction_placeholder:
+                continue
+
+            widget.setParent(None)
+            widget.deleteLater()
+
+        # 선택된 무기가 없을 때는
+        # 기존 QListWidget과 같은 빈 흰색 박스 표시
+        self._weapon_direction_layout.addWidget(
+            self._weapon_direction_placeholder,
+            1,
+        )
+
+        self._weapon_direction_placeholder.setEnabled(False)
+        self._weapon_direction_placeholder.show()
+
     def _rebuild_weapon_direction_lists(
         self,
         label: str,
@@ -1184,21 +1096,29 @@ class LabelDialog(QtWidgets.QDialog):
 
         direction_by_type = direction_by_type or {}
 
+        has_direction_list = False
+
         for weapon_type in self._selected_weapon_types():
             # 없음은 방향 없음
             if weapon_type == "None":
                 continue
 
-            options = (
-                self._annotation_rules
-                .weapon_direction_options(
-                    label,
-                    weapon_type,
-                )
+            options = self._annotation_rules.weapon_direction_options(
+                label,
+                weapon_type,
             )
 
             if not options:
                 continue
+
+            # 실제 방향 List가 하나라도 생기면
+            # 빈 placeholder 제거
+            if not has_direction_list:
+                self._weapon_direction_layout.removeWidget(
+                    self._weapon_direction_placeholder
+                )
+                self._weapon_direction_placeholder.hide()
+                has_direction_list = True
 
             section = QtWidgets.QWidget()
             section_layout = QtWidgets.QVBoxLayout()
@@ -1206,21 +1126,15 @@ class LabelDialog(QtWidgets.QDialog):
             section_layout.setSpacing(2)
             section.setLayout(section_layout)
 
-            weapon_label = QtWidgets.QLabel(
-                self._option_text(weapon_type)
-            )
+            weapon_label = QtWidgets.QLabel(self._option_text(weapon_type))
 
             direction_list = QtWidgets.QListWidget()
             direction_list.setSelectionMode(
                 QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
             )
-            direction_list.setPalette(
-                self.label_list.palette()
-            )
+            direction_list.setPalette(self.label_list.palette())
 
-            selected_direction = direction_by_type.get(
-                weapon_type
-            )
+            selected_direction = direction_by_type.get(weapon_type)
 
             self._populate_attribute_list(
                 direction_list,
@@ -1228,24 +1142,20 @@ class LabelDialog(QtWidgets.QDialog):
                 selected_value=selected_direction,
             )
 
-            direction_list.currentItemChanged.connect(
-                self._on_attribute_changed
-            )
+            direction_list.currentItemChanged.connect(self._on_attribute_changed)
 
-            self._weapon_direction_lists[
-                weapon_type
-            ] = direction_list
+            self._weapon_direction_lists[weapon_type] = direction_list
 
             section_layout.addWidget(weapon_label)
             section_layout.addWidget(direction_list)
 
-            # 1개면 전체 사용
-            # 2개면 QVBoxLayout에서 위/아래로 자동 분할
+            # 무기 1개면 1개,
+            # 2개면 위/아래로 2개 표시
             self._weapon_direction_layout.addWidget(
                 section,
                 1,
             )
-    
+
     def _on_weapon_type_selection_changed(
         self,
     ) -> None:
@@ -1260,23 +1170,18 @@ class LabelDialog(QtWidgets.QDialog):
         if not label:
             return
 
-        weapon_list = self._attribute_lists.get(
-            "무기타입"
-        )
+        weapon_list = self._attribute_lists.get("무기타입")
 
         if weapon_list is None:
             return
 
-        previous = list(
-            self._last_weapon_type_selection
-        )
+        previous = list(self._last_weapon_type_selection)
 
         current = self._selected_weapon_types()
 
         # 복수선택 클래스에서 None 배타 처리
         if (
-            self._annotation_rules
-            .allows_multiple_weapon_types(label)
+            self._annotation_rules.allows_multiple_weapon_types(label)
             and "None" in current
             and len(current) > 1
         ):
@@ -1288,37 +1193,23 @@ class LabelDialog(QtWidgets.QDialog):
             # 기존 None 상태에서 실제 무기를 눌렀다면
             # None 제거
             else:
-                target = [
-                    value
-                    for value in current
-                    if value != "None"
-                ]
+                target = [value for value in current if value != "None"]
 
             with QtCore.QSignalBlocker(weapon_list):
-                for row in range(
-                    weapon_list.count()
-                ):
+                for row in range(weapon_list.count()):
                     item = weapon_list.item(row)
 
-                    value = item.data(
-                        QtCore.Qt.ItemDataRole.UserRole
-                    )
+                    value = item.data(QtCore.Qt.ItemDataRole.UserRole)
 
-                    item.setSelected(
-                        value in target
-                    )
+                    item.setSelected(value in target)
 
             current = self._selected_weapon_types()
 
         # 무기 조합이 바뀌었으면 방향 전부 초기화
         if tuple(current) != tuple(previous):
-            self._last_weapon_type_selection = tuple(
-                current
-            )
+            self._last_weapon_type_selection = tuple(current)
 
             if "무기방향" in self._layout_attribute_keys:
-                self._rebuild_weapon_direction_lists(
-                    label
-                )
+                self._rebuild_weapon_direction_lists(label)
 
         self._refresh_ok_button()

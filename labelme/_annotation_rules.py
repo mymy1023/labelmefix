@@ -47,7 +47,7 @@ class AnnotationRules:
             "포/포탑",
         ],
     }
-    
+
     MULTI_WEAPON_LABELS = {
         "소형전술차량",
         "전차",
@@ -55,15 +55,11 @@ class AnnotationRules:
 
     def __init__(self, config: dict[str, Any]) -> None:
         self._attribute_defs = {
-            item["key"]: dict(item)
-            for item in config.get("shape_attributes", [])
+            item["key"]: dict(item) for item in config.get("shape_attributes", [])
         }
 
     def empty_attributes(self) -> dict[str, object]:
-        return {
-            key: None
-            for key in self._attribute_defs
-        }
+        return {key: None for key in self._attribute_defs}
 
     def ui_attribute_specs(
         self,
@@ -96,7 +92,7 @@ class AnnotationRules:
             ]
 
         return []
-    
+
     def allows_multiple_weapon_types(
         self,
         label: str,
@@ -128,16 +124,12 @@ class AnnotationRules:
         if weapon_type == "None":
             return []
 
-        attribute = self._attribute_defs.get(
-            "무기방향"
-        )
+        attribute = self._attribute_defs.get("무기방향")
 
         if attribute is None:
             return []
 
-        return list(
-            attribute.get("options", [])
-        )
+        return list(attribute.get("options", []))
 
     def options_for(
         self,
@@ -145,30 +137,21 @@ class AnnotationRules:
         attribute_key: str,
         attributes: dict[str, object] | None = None,
     ) -> list[object]:
-        attribute = self._attribute_defs.get(
-            attribute_key
-        )
+        attribute = self._attribute_defs.get(attribute_key)
 
         if attribute is None:
             return []
 
-        base_options = list(
-            attribute.get("options", [])
-        )
+        base_options = list(attribute.get("options", []))
 
         if attribute_key == "시선방향":
-            if label in (
-                self.HUMAN_LABELS
-                | self.VEHICLE_LABELS
-            ):
+            if label in (self.HUMAN_LABELS | self.VEHICLE_LABELS):
                 return base_options
 
             return []
 
         if attribute_key == "무기타입":
-            return self.weapon_type_options(
-                label
-            )
+            return self.weapon_type_options(label)
 
         if attribute_key == "무기방향":
             if label not in self.VEHICLE_LABELS:
@@ -200,14 +183,9 @@ class AnnotationRules:
             result,
         )
 
-        direction = result.get(
-            "시선방향"
-        )
+        direction = result.get("시선방향")
 
-        if (
-            direction is not None
-            and direction not in direction_options
-        ):
+        if direction is not None and direction not in direction_options:
             result["시선방향"] = None
 
         # --------------------------------------------------
@@ -216,13 +194,9 @@ class AnnotationRules:
         if label in self.HUMAN_LABELS:
             result["무기방향"] = None
 
-            weapon_options = (
-                self.weapon_type_options(label)
-            )
+            weapon_options = self.weapon_type_options(label)
 
-            weapon_type = result.get(
-                "무기타입"
-            )
+            weapon_type = result.get("무기타입")
 
             # 민간인처럼 무기타입 자체가 없는 경우
             if not weapon_options:
@@ -236,11 +210,7 @@ class AnnotationRules:
                     weapon_type,
                     list,
                 ):
-                    weapon_type = (
-                        weapon_type[0]
-                        if weapon_type
-                        else None
-                    )
+                    weapon_type = weapon_type[0] if weapon_type else None
 
                 if weapon_type not in weapon_options:
                     weapon_type = None
@@ -271,9 +241,7 @@ class AnnotationRules:
                 None,
             )
 
-            weapon_options = (
-                self.weapon_type_options(label)
-            )
+            weapon_options = self.weapon_type_options(label)
 
             # 민간차량
             if not weapon_options:
@@ -283,13 +251,9 @@ class AnnotationRules:
 
                 return result
 
-            raw_weapon_types = result.get(
-                "무기타입"
-            )
+            raw_weapon_types = result.get("무기타입")
 
-            raw_weapon_directions = result.get(
-                "무기방향"
-            )
+            raw_weapon_directions = result.get("무기방향")
 
             # ------------------------------
             # 기존 단일 문자열 데이터도
@@ -302,14 +266,10 @@ class AnnotationRules:
                 raw_weapon_types,
                 list,
             ):
-                weapon_types = list(
-                    raw_weapon_types
-                )
+                weapon_types = list(raw_weapon_types)
 
             else:
-                weapon_types = [
-                    raw_weapon_types
-                ]
+                weapon_types = [raw_weapon_types]
 
             if raw_weapon_directions is None:
                 weapon_directions: list[object] = []
@@ -318,14 +278,10 @@ class AnnotationRules:
                 raw_weapon_directions,
                 list,
             ):
-                weapon_directions = list(
-                    raw_weapon_directions
-                )
+                weapon_directions = list(raw_weapon_directions)
 
             else:
-                weapon_directions = [
-                    raw_weapon_directions
-                ]
+                weapon_directions = [raw_weapon_directions]
 
             # ------------------------------
             # 유효한 무기만 남김
@@ -336,9 +292,7 @@ class AnnotationRules:
 
             seen_weapon_types: set[object] = set()
 
-            for index, weapon_type in enumerate(
-                weapon_types
-            ):
+            for index, weapon_type in enumerate(weapon_types):
                 if weapon_type not in weapon_options:
                     continue
 
@@ -346,45 +300,28 @@ class AnnotationRules:
                 if weapon_type in seen_weapon_types:
                     continue
 
-                seen_weapon_types.add(
-                    weapon_type
-                )
+                seen_weapon_types.add(weapon_type)
 
                 direction = (
-                    weapon_directions[index]
-                    if index < len(
-                        weapon_directions
-                    )
-                    else None
+                    weapon_directions[index] if index < len(weapon_directions) else None
                 )
 
-                normalized_types.append(
-                    weapon_type
-                )
+                normalized_types.append(weapon_type)
 
                 # None은 방향 없음
                 if weapon_type == "None":
-                    normalized_directions.append(
-                        None
-                    )
+                    normalized_directions.append(None)
                     continue
 
-                valid_direction_options = (
-                    self.weapon_direction_options(
-                        label,
-                        weapon_type,
-                    )
+                valid_direction_options = self.weapon_direction_options(
+                    label,
+                    weapon_type,
                 )
 
-                if (
-                    direction
-                    not in valid_direction_options
-                ):
+                if direction not in valid_direction_options:
                     direction = None
 
-                normalized_directions.append(
-                    direction
-                )
+                normalized_directions.append(direction)
 
             # ------------------------------
             # None은 단독 값으로 저장
@@ -400,17 +337,10 @@ class AnnotationRules:
             # 자주포/장갑차처럼
             # 무기 옵션이 하나뿐이면 자동 지정
             # ------------------------------
-            if (
-                not normalized_types
-                and len(weapon_options) == 1
-            ):
-                normalized_types = [
-                    weapon_options[0]
-                ]
+            if not normalized_types and len(weapon_options) == 1:
+                normalized_types = [weapon_options[0]]
 
-                normalized_directions = [
-                    None
-                ]
+                normalized_directions = [None]
 
             # ------------------------------
             # 아직 무기 선택 전
@@ -429,10 +359,7 @@ class AnnotationRules:
             # 실제 선택된 무기가 2개 이상일 때만
             # list 형태로 저장
             # ------------------------------
-            if (
-                self.allows_multiple_weapon_types(label)
-                and len(normalized_types) >= 2
-            ):
+            if self.allows_multiple_weapon_types(label) and len(normalized_types) >= 2:
                 result["무기타입"] = normalized_types
                 result["무기방향"] = normalized_directions
                 result["무장여부"] = True
@@ -445,9 +372,7 @@ class AnnotationRules:
             result["무기타입"] = normalized_types[0]
 
             result["무기방향"] = (
-                normalized_directions[0]
-                if normalized_directions
-                else None
+                normalized_directions[0] if normalized_directions else None
             )
 
             result["무장여부"] = True

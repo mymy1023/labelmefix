@@ -5,7 +5,6 @@ import dataclasses
 import enum
 import typing
 from collections.abc import Callable
-from collections.abc import Sequence
 from typing import Any
 from typing import Final
 from typing import Literal
@@ -21,8 +20,6 @@ from PySide6.QtCore import QPointF
 from PySide6.QtCore import QRectF
 from PySide6.QtCore import Qt
 
-from .. import _ai_models
-from .. import _automation
 from .. import _shape
 from .. import _utils
 from .._shape import CIRCLE_POINT_COUNT
@@ -42,7 +39,6 @@ from ._shape_render import VertexHighlight
 from ._shape_render import bounds as _shape_bounds
 from ._shape_render import is_hit_by_point
 from ._shape_render import render_shape
-from .download import download_ai_model
 
 _DEFAULT_SHAPE_RGB: Final[tuple[int, int, int]] = (0, 255, 0)
 _DEFAULT_PALETTE: Final[Palette] = Palette.from_rgb(_DEFAULT_SHAPE_RGB)
@@ -114,14 +110,7 @@ _CreateMode = Literal[
     "line",
     "point",
     "linestrip",
-    "ai_points_to_shape",
-    "ai_box_to_shape",
 ]
-
-_AI_CREATE_MODES: Final[tuple[_CreateMode, ...]] = (
-    "ai_points_to_shape",
-    "ai_box_to_shape",
-)
 
 
 _CREATE_MODE_TO_SHAPE_TYPE: Final[dict[_CreateMode, ShapeType]] = {
@@ -132,8 +121,6 @@ _CREATE_MODE_TO_SHAPE_TYPE: Final[dict[_CreateMode, ShapeType]] = {
     "line": "line",
     "point": "point",
     "linestrip": "linestrip",
-    "ai_points_to_shape": "points",
-    "ai_box_to_shape": "rectangle",
 }
 
 
@@ -144,7 +131,6 @@ class _CanvasMode(enum.Enum):
 
 class Canvas(QtWidgets.QWidget):
     pixmap: QtGui.QPixmap
-    _pixmap_hash: int | None
     _cursor: CursorRole
     shapes: list[Shape]
     shape_backups: collections.deque[list[Shape]]
@@ -164,9 +150,6 @@ class Canvas(QtWidgets.QWidget):
     scroll_request = QtCore.Signal(int, Qt.Orientation)
     pan_request = QtCore.Signal(QPoint)
     new_shape = QtCore.Signal()
-    inference_produced_no_shapes = QtCore.Signal()
-    inference_failed = QtCore.Signal(str)
-    point_prompt_rejected = QtCore.Signal(str)
     degenerate_shape_rejected = QtCore.Signal()
     selection_changed = QtCore.Signal(list)
     shape_moved = QtCore.Signal()
@@ -201,12 +184,6 @@ class Canvas(QtWidgets.QWidget):
     _draft_palette: Palette
     _palette_cache: dict[str, Palette]
 
-    _ai_assist_session: _automation.AiAssistSession
-    _ai_suppress_existing_shape_matches: bool
-    _ai_existing_shape_highlights: list[Shape]
-    _ai_points_preview: list[Shape]
-    _ai_points_preview_key: tuple[object, ...] | None
-
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         self._epsilon: float = kwargs.pop("epsilon", 10.0)
         self._double_click = kwargs.pop("double_click", "close")
@@ -228,15 +205,10 @@ class Canvas(QtWidgets.QWidget):
                 "line": False,
                 "point": False,
                 "linestrip": False,
-                "ai_points_to_shape": False,
-                "ai_box_to_shape": True,
             },
         )
         super().__init__(*args, **kwargs)
 
-        self._ai_preview_timer = QtCore.QTimer(self)
-        self._ai_preview_timer.setSingleShot(True)
-        self._ai_preview_timer.timeout.connect(self._refresh_ai_points_preview)
         self._cursor = CursorRole.DEFAULT
         self.reset_state()
 
@@ -253,10 +225,6 @@ class Canvas(QtWidgets.QWidget):
         self._rotation_initial_angle = 0.0
         self._rotation_original_points = np.empty((0, 2))
         self._scale: float = 1.0
-        self._ai_assist_session = _automation.AiAssistSession()
-        self._ai_inference_failed = False
-        self._ai_suppress_existing_shape_matches = False
-        self._ai_existing_shape_highlights = []
         self._snapping = True
         self._hovered_shape_is_selected: bool = False
         self._painter = QtGui.QPainter()
@@ -421,7 +389,6 @@ class Canvas(QtWidgets.QWidget):
         # Update the mode before reconciling so any signals fired from a cancel
         # observe the new mode rather than the one being left behind.
         self._create_mode = new_mode
-        self._clear_ai_existing_shape_highlights()
         self._reconcile_partial_shape_on_mode_switch(
             old_mode=old_mode, new_mode=new_mode
         )
@@ -430,13 +397,9 @@ class Canvas(QtWidgets.QWidget):
     def _reconcile_partial_shape_on_mode_switch(
         self, *, old_mode: _CreateMode, new_mode: _CreateMode
     ) -> None:
-        # Point mode finalizes on click, while AI modes carry per-point labels;
-        # their seed points cannot start another shape type.
-        SEED_INCOMPATIBLE_CREATE_MODES: Final[tuple[_CreateMode, ...]] = (
-            "point",
-            "ai_points_to_shape",
-            "ai_box_to_shape",
-        )
+        # Point mode finalizes on click, so its seed point cannot start
+        # another shape type.
+        SEED_INCOMPATIBLE_CREATE_MODES: Final[tuple[_CreateMode, ...]] = ("point",)
 
         if self._current is None:
             return
@@ -458,69 +421,6 @@ class Canvas(QtWidgets.QWidget):
         )
         self._line = dataclasses.replace(self._line, shape_type=new_mode)
         self.update()
-
-    def get_ai_model_name(self) -> str:
-        return self._ai_assist_session.model_name
-
-    def set_ai_model_name(self, *, model_name: str) -> None:
-        if self._ai_assist_session.model_name == model_name:
-            return
-        self._ai_assist_session.model_name = model_name
-        self._clear_ai_existing_shape_highlights()
-
-    def set_ai_output_format(
-        self, output_format: _automation.AiOutputFormat, /
-    ) -> None:
-        if self._ai_assist_session.output_format == output_format:
-            return
-        self._ai_assist_session.output_format = output_format
-        self._clear_ai_existing_shape_highlights()
-
-    def set_ai_polygon_detail(self, *, detail: int) -> None:
-        if self._ai_assist_session.polygon_detail == detail:
-            return
-        self._ai_assist_session.polygon_detail = detail
-        self._clear_ai_existing_shape_highlights()
-
-    def set_ai_existing_shape_suppression(self, *, enabled: bool) -> None:
-        if self._ai_suppress_existing_shape_matches == enabled:
-            return
-        self._ai_suppress_existing_shape_matches = enabled
-        self._clear_ai_existing_shape_highlights()
-
-    def _propose_ai_shapes(
-        self,
-        *,
-        prompt_kind: _automation.AiPromptKind,
-        points: Sequence[QPointF],
-        point_labels: Sequence[int],
-    ) -> _automation.AiAssistProposal:
-        image: np.ndarray = _utils.img_qt_to_rgb_arr(self.pixmap.toImage())
-        proposal = self._ai_assist_session.propose_shapes(
-            image=image,
-            image_id=str(self._pixmap_hash),
-            prompt_kind=prompt_kind,
-            points=np.array([[p.x(), p.y()] for p in points]),
-            point_labels=np.array(point_labels),
-            existing_shapes=(
-                self.shapes if self._ai_suppress_existing_shape_matches else []
-            ),
-            image_size=(
-                None
-                if self._allow_out_of_bounds_points
-                else (image.shape[1], image.shape[0])
-            ),
-        )
-        _automation.assign_available_group_ids(
-            shapes=proposal.new_shapes,
-            existing_shapes=self.shapes,
-        )
-        return proposal
-
-    def _report_inference_failure(self, *, error: Exception) -> None:
-        self._ai_inference_failed = True
-        logger.opt(exception=error).error("AI inference failed")
-        self.inference_failed.emit(f"{type(error).__name__}: {error}")
 
     def backup_shapes(self) -> None:
         self.shape_backups.append([s.copy() for s in self.shapes])
@@ -568,8 +468,6 @@ class Canvas(QtWidgets.QWidget):
         if create_mode is not None:
             self._set_create_mode(value=create_mode)
         new_mode = _CanvasMode.EDIT if value else _CanvasMode.CREATE
-        if new_mode is not self.mode:
-            self._clear_ai_existing_shape_highlights()
         self.mode = new_mode
         if self.mode == _CanvasMode.EDIT:
             # CREATE -> EDIT
@@ -644,16 +542,6 @@ class Canvas(QtWidgets.QWidget):
     def _get_create_mode_message(self) -> str:
         assert self.mode == _CanvasMode.CREATE
         is_new: bool = self._current is None
-        if self.create_mode == "ai_points_to_shape":
-            return self.tr(
-                "Click points to include or Shift+Click to exclude."
-                " Ctrl+LeftClick ends creation."
-            )
-        if self.create_mode == "ai_box_to_shape":
-            if is_new:
-                return self.tr("Click first corner of bbox for AI segmentation")
-            else:
-                return self.tr("Click opposite corner to segment object")
         if self.create_mode == "line":
             if is_new:
                 return self.tr("Click start point for line")
@@ -801,13 +689,7 @@ class Canvas(QtWidgets.QWidget):
             self._line = dataclasses.replace(
                 self._line, points=(current.points[-1], pos), point_labels=(1, 1)
             )
-        elif mode == "ai_points_to_shape":
-            self._line = dataclasses.replace(
-                self._line,
-                points=(current.points[-1], pos),
-                point_labels=(current.point_labels[-1], 0 if is_shift_pressed else 1),
-            )
-        elif mode in ("rectangle", "ai_box_to_shape"):
+        elif mode == "rectangle":
             if is_shift_pressed:
                 pos = _snap_cursor_pos_for_square(
                     pos=pos, opposite_vertex=current.points[0]
@@ -1048,7 +930,6 @@ class Canvas(QtWidgets.QWidget):
     def _dispatch_pointer_press(
         self, *, pos: QPointF, event: QtGui.QMouseEvent
     ) -> None:
-        self._clear_ai_existing_shape_highlights()
         button = event.button()
         if button == Qt.MouseButton.LeftButton:
             self._press_left(pos=pos, event=event)
@@ -1080,27 +961,16 @@ class Canvas(QtWidgets.QWidget):
     ) -> None:
         if self._current is None and self._should_constrain_to_pixmap(pos):
             return
-        if self._reject_incompatible_point_prompt():
-            return
         if self._current is not None:
             self._extend_current_shape(current=self._current, event=event)
             return
         self._start_new_shape(pos=pos, event=event, is_shift_pressed=is_shift_pressed)
 
-    def _reject_incompatible_point_prompt(self) -> bool:
-        if self.create_mode != "ai_points_to_shape":
-            return False
-        model_name = self.get_ai_model_name()
-        if _ai_models.supports_point_prompts(model_name=model_name):
-            return False
-        self.point_prompt_rejected.emit(model_name)
-        return True
-
     def _extend_current_shape(
         self, *, current: _DraftShape, event: QtGui.QMouseEvent
     ) -> None:
         mode = self.create_mode
-        if mode in ("polygon", "linestrip", "ai_points_to_shape"):
+        if mode in ("polygon", "linestrip"):
             self._commit_preview_vertex(current=current, event=event)
         elif mode == "oriented_rectangle":
             if len(current.points) == ORIENTED_RECTANGLE_POINT_COUNT:
@@ -1109,7 +979,7 @@ class Canvas(QtWidgets.QWidget):
                 assert len(current.points) == 1
                 self._lock_oriented_rectangle_first_edge(current=current)
         else:
-            assert mode in ("rectangle", "circle", "line", "ai_box_to_shape")
+            assert mode in ("rectangle", "circle", "line")
             assert len(current.points) == 1
             self._current = dataclasses.replace(current, points=self._line.points)
             self._finalize()
@@ -1172,10 +1042,6 @@ class Canvas(QtWidgets.QWidget):
         is_shift_pressed: bool,
     ) -> None:
         mode = self.create_mode
-        if mode in _AI_CREATE_MODES:
-            model_name = self.get_ai_model_name()
-            if not download_ai_model(model_name=model_name, parent=self):
-                return
 
         self._current = _DraftShape(
             shape_type=_CREATE_MODE_TO_SHAPE_TYPE[mode]
@@ -1184,19 +1050,10 @@ class Canvas(QtWidgets.QWidget):
         if mode == "point":
             self._finalize()
             return
-        if (
-            mode == "ai_points_to_shape"
-            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
-        ):
-            self._finalize()
-            return
-
         self._line = dataclasses.replace(
             self._line,
             points=(pos, pos),
-            point_labels=(
-                (0, 0) if mode == "ai_points_to_shape" and is_shift_pressed else (1, 1)
-            ),
+            point_labels=(1, 1),
         )
         self.drawing_polygon.emit(True)  # noqa: FBT003 -- Qt signal payload is positional
         self.update()
@@ -1364,8 +1221,6 @@ class Canvas(QtWidgets.QWidget):
             return False
         if self._current is None:
             return False
-        if self.create_mode == "ai_points_to_shape":
-            return True
         if self.create_mode == "linestrip":
             return len(self._current.points) >= MIN_LINESTRIP_POINT_COUNT
         if self.create_mode == "oriented_rectangle":
@@ -1504,9 +1359,9 @@ class Canvas(QtWidgets.QWidget):
         # 각 귀퉁이의 반대편 고정점
         opposite = {
             0: QPointF(right, bottom),  # 좌상 ↔ 우하
-            1: QPointF(left, bottom),   # 우상 ↔ 좌하
-            2: QPointF(left, top),      # 우하 ↔ 좌상
-            3: QPointF(right, top),     # 좌하 ↔ 우상
+            1: QPointF(left, bottom),  # 우상 ↔ 좌하
+            2: QPointF(left, top),  # 우하 ↔ 좌상
+            3: QPointF(right, top),  # 좌하 ↔ 우상
         }[corner_index]
 
         # 이미지 밖으로 나가지 않도록 제한
@@ -1559,7 +1414,7 @@ class Canvas(QtWidgets.QWidget):
             i=1,
             pos=(right, bottom),
         )
-        
+
     def _bounded_move_oriented_rectangle_vertex(
         self, *, shape: Shape, vertex_index: int, pos: QPointF
     ) -> None:
@@ -1626,7 +1481,6 @@ class Canvas(QtWidgets.QWidget):
         self.shapes = [s for s in self.shapes if s not in self.selected_shapes]
         self.backup_shapes()
         self.selected_shapes.clear()
-        self._set_ai_existing_shape_highlights(shapes=[])
         self.update()
         return removed
 
@@ -1635,7 +1489,6 @@ class Canvas(QtWidgets.QWidget):
             self.selected_shapes.remove(shape)
         self.shapes = [s for s in self.shapes if s is not shape]
         self.backup_shapes()
-        self._set_ai_existing_shape_highlights(shapes=[])
         self.update()
 
     def paintEvent(self, a0: QtGui.QPaintEvent, /) -> None:
@@ -1674,7 +1527,6 @@ class Canvas(QtWidgets.QWidget):
             self._draw_active_shape_layer,
             self._draw_drag_copy_layer,
             self._draw_preview_overlay_layer,
-            self._draw_ai_existing_match_layer,
         )
 
     def _draw_pixmap_layer(self, painter: QtGui.QPainter, /) -> None:
@@ -1763,29 +1615,6 @@ class Canvas(QtWidgets.QWidget):
         for preview in previews:
             render_shape(painter=painter, shape=preview, context=context)
 
-    def _draw_ai_existing_match_layer(self, painter: QtGui.QPainter, /) -> None:
-        AI_EXISTING_MATCH_PALETTE: Final[Palette] = Palette(
-            line=QtGui.QColor(255, 170, 0),
-            fill=QtGui.QColor(255, 170, 0, 64),
-            select_line=QtGui.QColor(255, 170, 0),
-            select_fill=QtGui.QColor(255, 170, 0, 64),
-            vertex_fill=QtGui.QColor(255, 170, 0),
-            hvertex_fill=QtGui.QColor(255, 255, 255),
-        )
-        context = ShapeRenderContext(
-            scale=self.scale,
-            palette=AI_EXISTING_MATCH_PALETTE,
-            point_size=self._point_size,
-            point_type=self._point_type,
-            selected=False,
-            fill=True,
-            highlight=None,
-            rotation_highlight=None,
-            line_style=Qt.PenStyle.DashLine,
-        )
-        for shape in self._ai_existing_shape_highlights:
-            render_shape(painter=painter, shape=shape, context=context)
-
     def _render_draft(
         self, *, painter: QtGui.QPainter, draft: _DraftShape, highlighted: bool
     ) -> None:
@@ -1799,15 +1628,10 @@ class Canvas(QtWidgets.QWidget):
         render_shape(painter=painter, shape=shape, context=context)
 
     def _build_preview_shapes(self) -> list[Shape]:
-        if self.create_mode == "ai_points_to_shape":
-            # Defer inference until painting ends; unchanged inputs stop the loop.
-            self._ai_preview_timer.start(0)
         if self._current is None:
             return []
         if self.create_mode == "polygon":
             return [self._build_polygon_preview(current=self._current)]
-        if self.create_mode == "ai_points_to_shape":
-            return self._ai_points_preview
         return []
 
     def _build_polygon_preview(self, *, current: _DraftShape) -> Shape:
@@ -1818,55 +1642,6 @@ class Canvas(QtWidgets.QWidget):
         if self._fill_drawing and len(preview.points) >= MIN_POINTS_FOR_FILL_PREVIEW:
             preview = preview.add_point(self._line.points[1], autoclose=True)
         return _draft_to_shape(preview)
-
-    def _refresh_ai_points_preview(self) -> None:
-        current = self._current
-        if current is None or self.create_mode != "ai_points_to_shape":
-            self._ai_points_preview = []
-            self._ai_points_preview_key = None
-            return
-        key = (
-            current,
-            self._line,
-            self._ai_assist_session.model_name,
-            self._ai_assist_session.output_format,
-            self._ai_assist_session.polygon_detail,
-            self._ai_suppress_existing_shape_matches,
-            self._allow_out_of_bounds_points,
-            self._pixmap_hash,
-            tuple(self.shapes),
-        )
-        if key == self._ai_points_preview_key:
-            return
-        self._ai_points_preview_key = key
-        if not _ai_models.supports_point_prompts(model_name=self.get_ai_model_name()):
-            self._ai_points_preview = []
-            self._set_ai_existing_shape_highlights(shapes=[])
-            self.update()
-            return
-        preview = current.add_point(
-            self._line.points[1],
-            label=self._line.point_labels[1],
-        )
-        try:
-            proposal = self._propose_ai_shapes(
-                prompt_kind="points",
-                points=preview.points,
-                point_labels=preview.point_labels,
-            )
-        except Exception as e:
-            self._ai_points_preview = []
-            self._set_ai_existing_shape_highlights(shapes=[])
-            # Repeated failed prompts report once; a success re-arms the report.
-            if not self._ai_inference_failed:
-                self._report_inference_failure(error=e)
-        else:
-            self._ai_inference_failed = False
-            self._ai_points_preview = proposal.new_shapes
-            self._set_ai_existing_shape_highlights(
-                shapes=proposal.matching_existing_shapes
-            )
-        self.update()
 
     def transform_widget_point_to_image(self, point: QPointF, /) -> QPointF:
         origin = self._compute_image_origin_offset(area=None)
@@ -1896,77 +1671,28 @@ class Canvas(QtWidgets.QWidget):
 
     def _finalize(self) -> None:
         assert self._current is not None
-        if self._reject_incompatible_point_prompt():
+        self._current = self._current.close()
+        if _is_degenerate_draft(self._current):
+            self.degenerate_shape_rejected.emit()
+            self._cancel_current_shape()
             return
-        if self.create_mode in _AI_CREATE_MODES:
-            try:
-                proposal = self._build_ai_proposal()
-            except Exception as e:
-                self._report_inference_failure(error=e)
-                self._cancel_current_shape()
-                return
-            self._ai_inference_failed = False
-            new_shapes = proposal.new_shapes
-            if not new_shapes:
-                if not proposal.matching_existing_shapes:
-                    self.inference_produced_no_shapes.emit()
-                self._cancel_current_shape()
-                self._set_ai_existing_shape_highlights(
-                    shapes=proposal.matching_existing_shapes
-                )
-                return
-            self._set_ai_existing_shape_highlights(
-                shapes=proposal.matching_existing_shapes
-            )
-        else:
-            self._current = self._current.close()
-            if _is_degenerate_draft(self._current):
-                self.degenerate_shape_rejected.emit()
-                self._cancel_current_shape()
-                return
-            new_shapes = [_draft_to_shape(self._current)]
+        new_shapes = [_draft_to_shape(self._current)]
         self.shapes.extend(new_shapes)
         self.backup_shapes()
         self._reset_after_shape_creation()
 
-    def _build_ai_proposal(self) -> _automation.AiAssistProposal:
-        assert self._current is not None
-        if self.create_mode == "ai_points_to_shape":
-            return self._propose_ai_shapes(
-                prompt_kind="points",
-                points=self._current.points,
-                point_labels=self._current.point_labels,
-            )
-        if self.create_mode == "ai_box_to_shape":
-            # point_labels: 2=box corner, 3=opposite box corner (SAM convention)
-            return self._propose_ai_shapes(
-                prompt_kind="box",
-                points=_normalize_bbox_points(bbox_points=self._current.points),
-                point_labels=[2, 3],
-            )
-        raise AssertionError(f"unreachable: {self.create_mode}")
-
     def _reset_after_shape_creation(self) -> None:
         self._current = None
         # new_shape's handler blocks on the modal label dialog, so paint the
-        # committed shape synchronously first. Some modes, including point and
-        # AI-Box, can finalize without a matching preview on screen.
+        # committed shape synchronously first. Point mode can finalize without
+        # a matching preview on screen.
         self.repaint()
         self.new_shape.emit()
         self.update()
 
     def _cancel_current_shape(self) -> None:
         self._current = None
-        self._set_ai_existing_shape_highlights(shapes=[])
         self.drawing_polygon.emit(False)  # noqa: FBT003 -- Qt signal payload is positional
-        self.update()
-
-    def _set_ai_existing_shape_highlights(self, *, shapes: list[Shape]) -> None:
-        self._ai_existing_shape_highlights = shapes[:]
-
-    def _clear_ai_existing_shape_highlights(self) -> None:
-        if self._ai_existing_shape_highlights:
-            self._set_ai_existing_shape_highlights(shapes=[])
         self.update()
 
     # Required by QScrollArea: it queries these to compute the
@@ -2001,7 +1727,6 @@ class Canvas(QtWidgets.QWidget):
         return self._compute_canvas_size()
 
     def wheelEvent(self, a0: QtGui.QWheelEvent, /) -> None:
-        self._clear_ai_existing_shape_highlights()
         mods: Qt.KeyboardModifier = a0.modifiers()
         delta: QPoint = a0.angleDelta()
         if delta.isNull():
@@ -2035,7 +1760,6 @@ class Canvas(QtWidgets.QWidget):
         self._is_moving_shape = True
 
     def keyPressEvent(self, a0: QtGui.QKeyEvent, /) -> None:
-        self._clear_ai_existing_shape_highlights()
         modifiers = a0.modifiers()
         key = a0.key()
         if self.mode == _CanvasMode.CREATE:
@@ -2097,12 +1821,6 @@ class Canvas(QtWidgets.QWidget):
         return shapes
 
     def undo_last_line(self) -> None:
-        if self.create_mode in _AI_CREATE_MODES:
-            # Remove all unlabeled shapes at the tail (added by AI in one shot)
-            while self.shapes and self.shapes[-1].label is None:
-                self.shapes.pop()
-            self._cancel_current_shape()
-            return
         self._current = _shape_to_draft(self.shapes.pop()).open()
         if self.create_mode in POLYLINE_SHAPE_TYPES:
             self._line = dataclasses.replace(
@@ -2117,7 +1835,6 @@ class Canvas(QtWidgets.QWidget):
             "rectangle",
             "line",
             "circle",
-            "ai_box_to_shape",
         ):
             self._current = dataclasses.replace(
                 self._current,
@@ -2158,16 +1875,9 @@ class Canvas(QtWidgets.QWidget):
         self._hovered_edge = None
         self._hovered_rotation = None
         self._clear_highlight_state()
-        self._set_ai_existing_shape_highlights(shapes=[])
 
     def load_pixmap(self, *, pixmap: QtGui.QPixmap, clear_shapes: bool = True) -> None:
-        pixmap_arr = _utils.img_qt_to_arr(pixmap.toImage())
         self.pixmap = pixmap
-        self._pixmap_hash = hash(pixmap_arr.tobytes())
-        # A new image is a fresh inference context that should surface its own
-        # first failure rather than staying muted by the prior image's latch.
-        self._ai_inference_failed = False
-        self._set_ai_existing_shape_highlights(shapes=[])
         if clear_shapes:
             self.shapes = []
         self.update()
@@ -2202,12 +1912,8 @@ class Canvas(QtWidgets.QWidget):
         QtWidgets.QApplication.restoreOverrideCursor()
 
     def reset_state(self) -> None:
-        self._ai_preview_timer.stop()
-        self._ai_points_preview = []
-        self._ai_points_preview_key = None
         self._release_cursor()
         self.pixmap = QtGui.QPixmap()
-        self._pixmap_hash = None
         self.shapes = []
         self.shape_backups = collections.deque(maxlen=self._num_backups)
         self._is_moving_shape = False
@@ -2217,7 +1923,6 @@ class Canvas(QtWidgets.QWidget):
         self._view_offset = QPointF()
         self._highlight = None
         self._rotation_highlight = None
-        self._set_ai_existing_shape_highlights(shapes=[])
         self.hovered_shape = None
         self._last_hovered_shape = None
         self._hovered_vertex = None
@@ -2250,18 +1955,6 @@ def _is_degenerate_draft(draft: _DraftShape, /) -> bool:
             or points[1] == points[2]
         )
     return False
-
-
-def _normalize_bbox_points(*, bbox_points: Sequence[QPointF]) -> list[QPointF]:
-    if len(bbox_points) != RECTANGLE_POINT_COUNT:
-        raise ValueError(f"Expected 2 points for bbox, got {len(bbox_points)}")
-
-    p1, p2 = bbox_points
-    xmin = min(p1.x(), p2.x())
-    ymin = min(p1.y(), p2.y())
-    xmax = max(p1.x(), p2.x())
-    ymax = max(p1.y(), p2.y())
-    return [QPointF(xmin, ymin), QPointF(xmax, ymax)]
 
 
 def _snap_cursor_pos_for_square(*, pos: QPointF, opposite_vertex: QPointF) -> QPointF:

@@ -30,6 +30,7 @@ class HitTarget:
     shape: Shape
     index: int | None
 
+
 def _nearest_rectangle_corner_index(
     *,
     shape: Shape,
@@ -49,6 +50,7 @@ def _nearest_rectangle_corner_index(
         return index
 
     return None
+
 
 def find_hover_target(
     *,
@@ -70,10 +72,7 @@ def find_hover_target(
 
     # Pass 1: vertex proximity
     for shape in candidates:
-        if (
-            shape.shape_type == "rectangle"
-            and len(shape.points) == 2
-        ):
+        if shape.shape_type == "rectangle" and len(shape.points) == 2:
             idx = _nearest_rectangle_corner_index(
                 shape=shape,
                 point=point,

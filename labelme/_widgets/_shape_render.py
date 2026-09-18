@@ -167,9 +167,7 @@ def _paint_label(
     )
 
     text_color = (
-        QtGui.QColor(0, 0, 0)
-        if brightness > 160
-        else QtGui.QColor(255, 255, 255)
+        QtGui.QColor(0, 0, 0) if brightness > 160 else QtGui.QColor(255, 255, 255)
     )
 
     painter.setPen(text_color)
@@ -359,9 +357,8 @@ def _build_shape_oriented_rectangle_arrow_path(
     path.moveTo(tail)
     path.lineTo(tip)
 
-def rectangle_corners(
-    *, shape: Shape
-) -> npt.NDArray[np.float64]:
+
+def rectangle_corners(*, shape: Shape) -> npt.NDArray[np.float64]:
     """Return rectangle corners: TL, TR, BR, BL."""
 
     assert shape.shape_type == "rectangle"
@@ -376,13 +373,14 @@ def rectangle_corners(
 
     return np.array(
         [
-            [left, top],       # 0: 좌상
-            [right, top],      # 1: 우상
-            [right, bottom],   # 2: 우하
-            [left, bottom],    # 3: 좌하
+            [left, top],  # 0: 좌상
+            [right, top],  # 1: 우상
+            [right, bottom],  # 2: 우하
+            [left, bottom],  # 3: 좌하
         ],
         dtype=np.float64,
     )
+
 
 def _build_shape_points_paths(
     *,
@@ -396,19 +394,13 @@ def _build_shape_points_paths(
         assert len(points) in [1, 2]
         paths.line.addPath(_build_two_point_outline(shape=shape, scale=scale))
 
-        if (
-            shape.shape_type == "rectangle"
-            and len(points) == RECTANGLE_POINT_COUNT
-        ):
+        if shape.shape_type == "rectangle" and len(points) == RECTANGLE_POINT_COUNT:
             corners = rectangle_corners(shape=shape)
 
             for i, corner in enumerate(corners):
                 size = context.point_size
 
-                if (
-                    context.highlight is not None
-                    and context.highlight.index == i
-                ):
+                if context.highlight is not None and context.highlight.index == i:
                     size *= context.highlight.size_factor
 
                 pos = QtCore.QPointF(*(corner * scale))
