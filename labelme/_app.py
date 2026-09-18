@@ -30,6 +30,7 @@ from labelme import __version__
 
 from . import _config
 from . import _utils
+from ._annotation_rules import AnnotationRules
 from ._label_file import LABEL_FILE_SUFFIX
 from ._label_file import Annotation
 from ._label_file import LabelFileError
@@ -60,7 +61,6 @@ from ._widgets import ZoomWidget
 from ._widgets import format_shape_label
 from ._widgets.label_list_widget import LABEL_COLOR_ROLE
 
-
 class _ZoomMode(enum.Enum):
     FIT_WINDOW = enum.auto()
     FIT_WIDTH = enum.auto()
@@ -70,7 +70,6 @@ class _ZoomMode(enum.Enum):
 WINDOW_SIZE_KEY: Final[str] = "window/size"
 WINDOW_POSITION_KEY: Final[str] = "window/position"
 WINDOW_LAYOUT_KEY: Final[str] = "window/state"
-
 
 class _StatusBarWidgets(NamedTuple):
     message: QtWidgets.QLabel
@@ -157,7 +156,6 @@ class _Actions(NamedTuple):
     context_menu: tuple[QtGui.QAction, ...]
     edit_menu: tuple[QtGui.QAction, ...]
 
-
 class _Menus(NamedTuple):
     file: QtWidgets.QMenu
     edit: QtWidgets.QMenu
@@ -170,6 +168,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _config_file: Path | None
     _config: dict
     _config_overrides: dict
+    _annotation_rules: AnnotationRules
     _opened_as_directory: bool = False
 
     _is_changed: bool = False
@@ -212,10 +211,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(__appname__)
 
         self._config_file, self._config = self._load_config(
-            config_file=config_file, config_overrides=config_overrides
+            config_file=config_file,
+            config_overrides=config_overrides,
         )
         self._config_overrides = config_overrides or {}
         self._shape_color_preview = None
+
+        self._annotation_rules = AnnotationRules(self._config)
 
         self._shape_clipboard = ShapeClipboard(parent=self)
 
@@ -1385,7 +1387,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 if field not in locked:
                     setattr(shape, field, getattr(entry, field))
             
-            shape.other_data.update(entry.attributes)
+            attributes = dict(shape.other_data)
+            attributes.update(entry.attributes)
+
+            shape.other_data = self._annotation_rules.normalize_for_label(
+                entry.label,
+                attributes,
+            )
             
             assert shape.label is not None
             fill_rgb = self._get_rgb_by_label(
@@ -1672,7 +1680,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 shape.group_id = entry.group_id
 
             shape.description = entry.description
-            shape.other_data.update(entry.attributes)
+
+            attributes = dict(shape.other_data)
+            attributes.update(entry.attributes)
+
+            shape.other_data = self._annotation_rules.normalize_for_label(
+                entry.label,
+                attributes,
+            )
 
             self.add_label(shape=shape)
         self._actions.edit_mode.setEnabled(True)
@@ -1945,6 +1960,7 @@ class MainWindow(QtWidgets.QMainWindow):
             shapes = _shapes_from_dicts(
                 shape_dicts=annotation.shapes,
                 label_flags=self._config["label_flags"],
+                annotation_rules=self._annotation_rules,
             )
         else:
             annotation = self._read_image_as_annotation(image_path=image_or_label_path)
@@ -2321,34 +2337,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _make_label_dialog(self, *, label_history: list[str] | None) -> LabelDialog:
         return LabelDialog(
             parent=self,
-            labels=[
-                "person",
-                "soldier",
-                "rifle",
-                "heavyweapon",
-                "antitank",
-                "vehicle",
-                "lighttact",
-                "tank",
-                "selfprop",
-                "armored",
-                "turr-s",
-                "turr-a",
-            ],
-            shape_attributes=[
-                {
-                    "key": "direction",
-                    "label": "Direction",
-                    "options": [
-                        "front",
-                        "side",
-                        "rear",
-                        "unknown",
-                    ],
-                }
-            ],
-            sort_labels=False,
-            show_text_field=False,
+            labels=self._config["labels"] or [],
+            shape_attributes=self._config["shape_attributes"] or [],
+            annotation_rules=self._annotation_rules,
+            sort_labels=self._config["sort_labels"],
+            show_text_field=self._config["show_label_text_field"],
             completion=self._config["label_completion"],
             fit_to_content=self._config["fit_to_content"],
             flags=self._config["label_flags"],
@@ -2816,15 +2809,16 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         self._status_bar.stats.setText(" | ".join(stats))
 
-
 def _shapes_from_dicts(
     *,
     shape_dicts: list[ShapeDict],
     label_flags: dict[str, list[str]] | None,
+    annotation_rules: AnnotationRules,
 ) -> list[Shape]:
     compiled_label_flags = compile_label_flags(label_flags=label_flags)
 
     shapes: list[Shape] = []
+
     for shape_dict in shape_dicts:
         shape = Shape(
             label=shape_dict["label"],
@@ -2837,6 +2831,7 @@ def _shapes_from_dicts(
         )
 
         default_flags: dict[str, bool] = {}
+
         if isinstance(shape.label, str):
             for pattern, keys in compiled_label_flags.items():
                 if pattern.match(shape.label):
@@ -2844,11 +2839,17 @@ def _shapes_from_dicts(
                         default_flags[key] = False
         else:
             logger.warning("shape.label is not str: {}", shape.label)
+
         shape.flags = default_flags
         shape.flags.update(shape_dict["flags"])
-        shape.other_data = shape_dict["other_data"]
+
+        shape.other_data = annotation_rules.normalize_for_label(
+            shape.label,
+            shape_dict["other_data"],
+        )
 
         shapes.append(shape)
+
     return shapes
 
 def _is_valid_label(

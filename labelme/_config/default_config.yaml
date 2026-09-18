@@ -11,29 +11,46 @@ language: en_US
 color_theme: system
 flags:
 label_flags:
-# class 속성
+# class
 labels:
-  - person
-  - soldier
-  - rifle
-  - heavyweapon
-  - antitank
-  - vehicle
-  - lighttact
-  - tank
-  - selfprop
-  - armored
-  - turr-s
-  - turr-a
-# 사용자 정의 속성
+  - 민간인
+  - 군인
+  - 민간차량
+  - 소형전술차량
+  - 전차
+  - 자주포
+  - 장갑차
+
+# attributes
 shape_attributes:
-  - key: direction
-    label: Direction
+  - key: 시선방향
+    label: 시선방향
     options:
-      - front
-      - side
-      - rear
-      - unknown
+      - 정면
+      - 측면
+      - 후면
+      - 불분명
+
+  - key: 무장여부
+    label: 무장여부
+    options:
+      - true
+      - false
+
+  - key: 무기타입
+    label: 무기타입
+    options:
+      - 소총
+      - 대전차화기
+      - 원격무장
+      - 포/포탑
+      - None
+
+  - key: 무기방향
+    label: 무기방향
+    options:
+      - 정면
+      - 이외
 file_search:
 sort_labels: false
 validate_label: exact
