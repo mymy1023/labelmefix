@@ -4,7 +4,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import onnxruntime  # noqa: F401  # load DLLs before PySide6 on Windows
 from PySide6 import QtCore
 from PySide6 import QtGui
 from PySide6 import QtWidgets

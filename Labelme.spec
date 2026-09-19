@@ -14,7 +14,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyQt5', 'PyQt6', 'PySide2'],
+    excludes=['PyQt5', 'PyQt6', 'PySide2', 'torch', 'torchvision', 'transformers', 'huggingface_hub', 'onnx', 'onnxruntime', 'osam', 'tensorflow'],
     noarchive=False,
     optimize=0,
 )

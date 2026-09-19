@@ -8,8 +8,6 @@ from typing import cast
 
 from PySide6.QtCore import QT_TRANSLATE_NOOP
 
-from .._ai_models import AI_ASSIST_MODEL_OPTIONS
-
 Group = Literal[
     "Appearance and language",
     "Files and saving",
@@ -17,7 +15,6 @@ Group = Literal[
     "Continue between images",
     "Label sources",
     "Label behavior",
-    "AI assist",
 ]
 Kind = Literal["bool", "color", "enum", "int", "str_list", "language"]
 
@@ -32,7 +29,6 @@ _TRANSLATABLE_GROUPS: Final = (
     QT_TRANSLATE_NOOP("SettingsDialog", "Continue between images"),
     QT_TRANSLATE_NOOP("SettingsDialog", "Label sources"),
     QT_TRANSLATE_NOOP("SettingsDialog", "Label behavior"),
-    QT_TRANSLATE_NOOP("SettingsDialog", "AI assist"),
 )
 assert set(_TRANSLATABLE_GROUPS) == set(typing.get_args(Group))
 
@@ -253,65 +249,6 @@ SETTINGS: Final[tuple[Setting, ...]] = (
         choice_labels=(
             cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Starts with")),
             cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Contains")),
-        ),
-    ),
-    Setting(
-        # Choices are the models' display names, matching the format
-        # AiAssistedAnnotationWidget itself stores in ai.default (see
-        # _ai_assisted_annotation_widget.py, where the dock combobox looks up
-        # its initial selection by display name, not model id).
-        key_path=("ai", "default"),
-        group="AI assist",
-        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Default model")),
-        kind="enum",
-        choices=tuple(option.display_name for option in AI_ASSIST_MODEL_OPTIONS),
-        # pyside6-lupdate needs literal markers here. A schema test keeps these
-        # translation declarations aligned with the shared non-Qt model list.
-        choice_labels=(
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "EfficientSam (speed)")),
-            cast(
-                str,
-                QT_TRANSLATE_NOOP("SettingsDialog", "EfficientSam (accuracy)"),
-            ),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam (speed)")),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam (balanced)")),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam (accuracy)")),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam2 (speed)")),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam2 (balanced)")),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam2 (accuracy)")),
-            cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Sam3")),
-        ),
-    ),
-    Setting(
-        key_path=("mask_polygonization", "detail"),
-        group="AI assist",
-        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Polygon detail")),
-        kind="int",
-        note=cast(
-            str,
-            QT_TRANSLATE_NOOP(
-                "SettingsDialog",
-                "Higher values preserve more Mask boundary detail and smaller lands.",
-            ),
-        ),
-        minimum=0,
-        maximum=100,
-    ),
-    Setting(
-        key_path=("ai", "suppress_existing_shape_matches"),
-        group="AI assist",
-        label=cast(
-            str,
-            QT_TRANSLATE_NOOP("SettingsDialog", "Suppress existing Shape matches"),
-        ),
-        kind="bool",
-        note=cast(
-            str,
-            QT_TRANSLATE_NOOP(
-                "SettingsDialog",
-                "When an AI Assist candidate matches an existing Shape, highlight "
-                "that Shape instead of creating a new Shape.",
-            ),
         ),
     ),
 )
