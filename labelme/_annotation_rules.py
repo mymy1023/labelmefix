@@ -42,15 +42,19 @@ class AnnotationRules:
         ],
         "자주포": [
             "포/포탑",
+            "원격무장",
         ],
         "장갑차": [
             "포/포탑",
+            "원격무장",
         ],
     }
 
     MULTI_WEAPON_LABELS = {
         "소형전술차량",
         "전차",
+        "자주포",
+        "장갑차",
     }
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -333,10 +337,6 @@ class AnnotationRules:
 
                 return result
 
-            # ------------------------------
-            # 자주포/장갑차처럼
-            # 무기 옵션이 하나뿐이면 자동 지정
-            # ------------------------------
             if not normalized_types and len(weapon_options) == 1:
                 normalized_types = [weapon_options[0]]
 
