@@ -4,6 +4,7 @@ from typing import Any
 
 
 class AnnotationRules:
+    
     HUMAN_LABELS = {
         "민간인",
         "군인",
@@ -15,6 +16,11 @@ class AnnotationRules:
         "전차",
         "자주포",
         "장갑차",
+    }
+    
+    NULL_DIRECTION_LABELS = {
+        "민간인",
+        "민간차량",
     }
 
     UI_ATTRIBUTE_KEYS = (
@@ -36,8 +42,8 @@ class AnnotationRules:
             "None",
         ],
         "전차": [
-            "원격무장",
             "포/포탑",
+            "원격무장",
             "None",
         ],
         "자주포": [
@@ -151,6 +157,9 @@ class AnnotationRules:
         base_options = list(attribute.get("options", []))
 
         if attribute_key == "시선방향":
+            if label in self.NULL_DIRECTION_LABELS:
+                return []
+
             if label in (self.HUMAN_LABELS | self.VEHICLE_LABELS):
                 return base_options
 
@@ -183,16 +192,20 @@ class AnnotationRules:
         # --------------------------------------------------
         # 시선방향
         # --------------------------------------------------
-        direction_options = self.options_for(
-            label,
-            "시선방향",
-            result,
-        )
-
-        direction = result.get("시선방향")
-
-        if direction is not None and direction not in direction_options:
+        if label in self.NULL_DIRECTION_LABELS:
             result["시선방향"] = None
+
+        else:
+            direction_options = self.options_for(
+                label,
+                "시선방향",
+                result,
+            )
+
+            direction = result.get("시선방향")
+
+            if direction is not None and direction not in direction_options:
+                result["시선방향"] = None
 
         # --------------------------------------------------
         # 사람
@@ -204,10 +217,9 @@ class AnnotationRules:
 
             weapon_type = result.get("무기타입")
 
-            # 민간인처럼 무기타입 자체가 없는 경우
             if not weapon_options:
                 result["무기타입"] = None
-                result["무장여부"] = None
+                result["무장여부"] = False
 
             else:
                 # 혹시 이전 데이터가 배열이라면
@@ -224,7 +236,7 @@ class AnnotationRules:
                 result["무기타입"] = weapon_type
 
                 if weapon_type is None:
-                    result["무장여부"] = None
+                    result["무장여부"] = False
 
                 elif weapon_type == "None":
                     result["무장여부"] = False
@@ -253,7 +265,7 @@ class AnnotationRules:
             if not weapon_options:
                 result["무기타입"] = None
                 result["무기방향"] = None
-                result["무장여부"] = None
+                result["무장여부"] = False
 
                 return result
 
@@ -350,7 +362,7 @@ class AnnotationRules:
             if not normalized_types:
                 result["무기타입"] = None
                 result["무기방향"] = None
-                result["무장여부"] = None
+                result["무장여부"] = False
 
                 return result
 
