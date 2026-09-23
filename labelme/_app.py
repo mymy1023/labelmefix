@@ -1563,7 +1563,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 annotation=annotation,
                 image_height=self._image.height(),
                 image_width=self._image.width(),
-                save_image_data=self._config["with_image_data"],
+                save_image_data=False,
             )
             self._label_file_path = label_path
             items = self._docks.file_list.findItems(
