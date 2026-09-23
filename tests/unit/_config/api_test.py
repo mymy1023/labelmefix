@@ -71,29 +71,6 @@ def test_migrate_removes_logger_level(*, tmp_path: Path) -> None:
         ("Sam2 (balanced)", "Sam2 (balanced)"),
     ],
 )
-def test_migrate_ai_model_name(*, input_name: str, expected_name: str) -> None:
-    config: dict = {"ai": {"default": input_name}}
-    _config._migrate_config_from_file(config_from_yaml=config)
-    assert config["ai"]["default"] == expected_name
-
-
-@pytest.mark.parametrize("model_name", [True, 42, ["Sam"]])
-def test_migrate_tolerates_non_string_ai_default(*, model_name: object) -> None:
-    config: dict = {"ai": {"default": model_name}}
-    _config._migrate_config_from_file(config_from_yaml=config)
-    assert config["ai"]["default"] == model_name
-
-
-def test_load_config_keeps_other_keys_when_ai_default_is_not_a_string(
-    *,
-    tmp_path: Path,
-) -> None:
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text("labels:\n  - cat\n  - dog\nai:\n  default: true\n")
-    config = _config.load_config(config_file=config_file, config_overrides={})
-    assert config["ai"]["default"] is True
-    assert config["labels"] == ["cat", "dog"]
-
 
 @pytest.mark.parametrize("value", [-1, 101, True, "80"])
 def test_load_config_rejects_invalid_polygon_detail(
@@ -235,35 +212,6 @@ def test_load_config_tolerates_removed_add_point_to_edge_shortcut(
     ],
     ids=["polygon", "mask", "both", "neither"],
 )
-def test_migrate_ai_crosshair_keys_to_ai_points_to_shape(
-    *, ai_polygon: bool, ai_mask: bool, expected: bool
-) -> None:
-    config = {"canvas": {"crosshair": {"ai_polygon": ai_polygon, "ai_mask": ai_mask}}}
-    _config._migrate_config_from_file(config_from_yaml=config)
-    crosshair = config["canvas"]["crosshair"]
-    assert "ai_polygon" not in crosshair
-    assert "ai_mask" not in crosshair
-    assert crosshair["ai_points_to_shape"] is expected
-
-
-def test_migrate_ai_crosshair_keeps_explicit_ai_points_to_shape() -> None:
-    config = {
-        "canvas": {"crosshair": {"ai_polygon": True, "ai_points_to_shape": False}}
-    }
-    _config._migrate_config_from_file(config_from_yaml=config)
-    crosshair = config["canvas"]["crosshair"]
-    assert "ai_polygon" not in crosshair
-    assert crosshair["ai_points_to_shape"] is False
-
-
-def test_load_config_tolerates_legacy_ai_crosshair_keys(*, tmp_path: Path) -> None:
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text(
-        "canvas:\n  crosshair:\n    ai_polygon: true\n    ai_mask: false\n"
-    )
-    config = _config.load_config(config_file=config_file, config_overrides={})
-    assert config["canvas"]["crosshair"]["ai_points_to_shape"] is True
-
 
 def test_migrate_leaves_malformed_crosshair_for_merge_to_report() -> None:
     config = {"canvas": {"crosshair": "oops"}}

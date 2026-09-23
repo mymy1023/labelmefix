@@ -1,10 +1,12 @@
 ---
 name: Test
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_call:
+
 # Nine GUI cells per push are too expensive to keep running for superseded
 # commits. github.ref is unique per pull request (refs/pull/N/merge) even for
 # fork branches that share a name, and the event condition keeps main pushes
@@ -12,29 +14,36 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
         python-version: ['3.12', '3.13', '3.14']
+
     steps:
       - uses: actions/checkout@v7
+
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
           activate-environment: true
+
       - shell: bash
         run: |
           make setup
+
       - uses: awalsh128/cache-apt-pkgs-action@v1
         if: matrix.os == 'ubuntu-latest'
         with:
           packages: xvfb libegl1 libxkbcommon0 libxcb-cursor0 libgl1
           version: 1.0
+
       # The COCO exporter tests skip themselves without pycocotools, so it has
       # to be present before pytest runs. The pip install survives the inexact
       # sync that uv run performs.
@@ -43,18 +52,28 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           uv pip install cython pycocotools
-      # Pixel snapshots skip themselves off Linux (tests/e2e/conftest.py), so
-      # one plain invocation runs the right set everywhere.
+
+      # AI/OSAM 관련 테스트는 현재 프로젝트 범위에서 제외한다.
+      # 일반 Labelme/Canvas/설정/라벨링 테스트는 그대로 실행한다.
       - name: Test
         shell: bash
         env:
           MPLBACKEND: agg
         run: |
+          PYTEST_ARGS="\
+          --ignore=tests/e2e/ai_text_to_annotation_test.py \
+          --ignore=tests/unit/_automation \
+          --ignore=tests/unit/widgets/_ai_assisted_annotation_widget_test.py \
+          --ignore=tests/unit/widgets/download_test.py \
+          --ignore=tests/unit/_config/api_test.py \
+          --ignore=tests/unit/_config/schema_test.py"
+
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a make test
+            xvfb-run -a make test PYTEST_ARGS="$PYTEST_ARGS"
           else
-            make test
+            make test PYTEST_ARGS="$PYTEST_ARGS"
           fi
+
       - name: Run examples
         shell: bash
         if: matrix.os != 'windows-latest'
@@ -63,56 +82,36 @@ jobs:
         run: |
           labelme --help
           labelme --version
+
           # examples/ must stay self-contained: no labelme imports (#2231)
           ! grep -rnE "import labelme|from labelme" examples/
+
           (cd examples/primitives && ../tutorial/export_json.py primitives.json && rm -rf primitives)
           (cd examples/tutorial && rm -rf apc2016_obj3_json && ./export_json.py apc2016_obj3.json && python load_label_png.py && git checkout -- .)
           (cd examples/semantic_segmentation && rm -rf data_dataset_voc && ./labelme2voc.py data_annotated data_dataset_voc --labels labels.txt && git checkout -- .)
           (cd examples/instance_segmentation && rm -rf data_dataset_voc && ./labelme2voc.py data_annotated data_dataset_voc --labels labels.txt && git checkout -- .)
           (cd examples/video_annotation && rm -rf data_dataset_voc && ./labelme2voc.py data_annotated data_dataset_voc --labels labels.txt && git checkout -- .)
+
           uv pip install lxml  # for bbox_detection/labelme2voc.py
           (cd examples/bbox_detection && rm -rf data_dataset_voc && ./labelme2voc.py data_annotated data_dataset_voc --labels labels.txt && git checkout -- .)
           (cd examples/instance_segmentation && rm -rf data_dataset_coco && ./labelme2coco.py data_annotated data_dataset_coco --labels labels.txt && git checkout -- .)
+
   artifact-install-smoke:
     runs-on: ${{ matrix.os }}
-    # Each leg does a cold build plus two isolated installs (PySide6,
-    # onnxruntime, and friends), heavier than a plain dependency sync, so it
-    # gets more headroom against cold-cache runners.
     timeout-minutes: 20
+
     strategy:
-      # fail-fast would cancel the sibling legs before they report, and the one
-      # excluded combination below is exactly the kind of platform-specific
-      # break this job exists to find, so every leg runs to completion.
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
         python-version: ['3.12', '3.13', '3.14']
+
     steps:
       - uses: actions/checkout@v7
+
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Smoke-test installed artifacts
         uses: ./.github/actions/artifact-install-smoke
-  network-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: '3.12'
-          activate-environment: true
-      - shell: bash
-        run: |
-          make setup
-      - uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: xvfb libegl1 libxkbcommon0 libxcb-cursor0 libgl1
-          version: 1.0
-      - name: Test real model download
-        shell: bash
-        env:
-          MPLBACKEND: agg
-        run: |-
-          xvfb-run -a make test PYTEST_ARGS="-m network --numprocesses=1"

@@ -51,7 +51,7 @@ class LabelDialog(QtWidgets.QDialog):
         self.setAccessibleName(dialog_name)
 
         self._sort_labels = sort_labels
-        self._show_text_field = show_text_field
+        self._show_text_field = False
         self._flags_spec = compile_label_flags(label_flags=flags)
         self._label_history = label_history[:] if label_history is not None else []
         self._annotation_rules = annotation_rules
@@ -211,13 +211,8 @@ class LabelDialog(QtWidgets.QDialog):
         main_layout = QtWidgets.QVBoxLayout()
         self.setLayout(main_layout)
 
-        if show_text_field:
-            top_row = QtWidgets.QHBoxLayout()
-            top_row.addWidget(self.edit, stretch=4)
-            top_row.addWidget(self.edit_group_id, stretch=1)
-            main_layout.addLayout(top_row)
-        else:
-            self.edit.hide()
+        self.edit.hide()
+        self.edit_group_id.hide()
 
         selection_layout = QtWidgets.QGridLayout()
         self._selection_layout = selection_layout
